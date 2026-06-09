@@ -1,0 +1,9 @@
+#!/bin/sh
+# 提交前移除 Cursor 自动追加的署名行，避免 Contributors 出现 cursoragent。
+msg=$1
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT INT HUP
+grep -v -E '^Co-authored-by:[[:space:]]*Cursor[[:space:]]*<cursoragent@cursor\.com>[[:space:]]*$' "$msg" |
+  grep -v -E '^Made-with:[[:space:]]*Cursor[[:space:]]*$' >"$tmp" || true
+cmp -s "$msg" "$tmp" || cp "$tmp" "$msg"
+exit 0

@@ -1,0 +1,389 @@
+.gif-composer-root {
+  color-scheme: light dark;
+  --bg: #0f1419;
+  --surface: #171f27;
+  --border: #2a3540;
+  --text: #e7edf3;
+  --muted: #9fb0c0;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --danger: #ef4444;
+  --radius: 12px;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Noto Sans",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  .gif-composer-root {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --muted: #64748b;
+  }
+}
+
+.gif-composer-root * {
+  box-sizing: border-box;
+}
+
+.gif-composer-root {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+
+.hero h1 {
+  margin: 0 0 8px;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.edition-badge {
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--surface) 92%, var(--border));
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.edition-badge.pro {
+  color: #fff;
+  border-color: #1d4ed8;
+  background: linear-gradient(180deg, var(--accent), var(--accent-hover));
+}
+
+@media (max-width: 720px) {
+  .edition-badge {
+    width: 100%;
+    text-align: center;
+    margin-right: 0;
+    margin-bottom: 4px;
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 22px 0 14px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.05s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: linear-gradient(180deg, var(--accent), var(--accent-hover));
+  border-color: #1d4ed8;
+  color: #fff;
+  font-weight: 600;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.danger {
+  border-color: color-mix(in oklab, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+.delay {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.delay input {
+  width: 110px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.status {
+  min-height: 1.4em;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.status.error {
+  color: #f97316;
+}
+
+.pro-record-panel {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, #22c55e 35%, var(--border));
+  background: color-mix(in oklab, #22c55e 7%, var(--surface));
+}
+
+.pro-record-title {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.pro-record-desc {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.pro-record-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+}
+
+.pro-record-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.pro-record-label input {
+  width: 88px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+button.record-btn {
+  padding: 8px 12px;
+  font-size: 0.88rem;
+}
+
+button.record-btn.primary {
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  border-color: #15803d;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 录屏：框选区域浮层 */
+.record-region-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+/* 录制阶段：视觉保留选框，但点击穿透到下方主界面（否则无法点「停止」） */
+.record-region-backdrop.record-region-passthrough {
+  pointer-events: none;
+}
+
+.record-region-backdrop.record-region-passthrough .record-region-panel {
+  pointer-events: auto; /* 允许在录制期间仍可拖动面板 */
+  opacity: 0.85; /* 稍微透明一点，减少遮挡 */
+}
+
+.record-region-panel {
+  max-width: min(96vw, 1280px);
+  max-height: 96vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.record-region-title {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.record-region-hint {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.record-region-stage {
+  position: relative;
+  margin: 0 auto 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.record-region-video {
+  vertical-align: top;
+}
+
+.record-region-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  touch-action: none;
+}
+
+.record-region-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.record-region-btn {
+  appearance: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.record-region-btn.primary {
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  border-color: #15803d;
+  color: #fff;
+  font-weight: 600;
+}
+
+.record-region-btn.ghost:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+}
+
+.grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  cursor: grab;
+  /* 避免触控滚动抢走指针，便于在移动端拖动排序 */
+  touch-action: none;
+}
+
+.card.dragging-source {
+  opacity: 0.6;
+  pointer-events: none;
+  cursor: grabbing;
+}
+
+.card.drag-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+.card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: color-mix(in oklab, var(--border) 35%, transparent);
+  user-select: none;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
+.card .meta {
+  padding: 0 10px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.card .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.card button {
+  cursor: pointer;
+}
