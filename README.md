@@ -142,17 +142,31 @@ npm run tauri:build  # 本地打包
 2. 功能在本地验证通过：`npm run tauri:build`
 3. 相关改动已合并到 `main` 并推送到远程
 
-### 打 tag 并触发打包
+### 一键发版（推荐）
 
-版本号示例以 `0.1.0` 为例（tag 必须带 `v` 前缀）：
+先确保功能改动已提交，工作区干净，然后：
 
 ```bash
-# 1. 确认当前在 main 且工作区干净
-git checkout main
-git pull
-git status
+npm run release -- 0.1.1
+```
 
-# 2. 创建并推送 tag（推送后自动开始 CI 打包）
+脚本会自动：同步三处版本号 → 提交 → 推送 → 打 `v0.1.1` tag → 触发 CI 打包。
+
+常用选项：
+
+```bash
+npm run release -- 0.1.1 --dry-run      # 只预览，不执行
+npm run release -- 0.1.1 --yes          # 跳过确认
+npm run release -- 0.1.1 --no-push      # 只本地提交+打 tag
+npm run release -- 0.2.0-beta.1         # 预发布
+```
+
+### 手动打 tag
+
+若不用脚本，版本号示例以 `0.1.0` 为例（tag 必须带 `v` 前缀）：
+
+```bash
+git checkout main && git pull
 git tag -a v0.1.0 -m "release: v0.1.0"
 git push origin v0.1.0
 ```
