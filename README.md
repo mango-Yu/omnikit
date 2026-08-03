@@ -111,12 +111,64 @@ git clone https://github.com/mango-Yu/quickkit.git
 cd quickkit
 npm install
 npm run tauri:dev    # 开发（热更新）
-npm run tauri:build  # 打包
+npm run tauri:build  # 本地打包
 ```
 
 安装包输出目录：`src-tauri/target/release/bundle/`（macOS：`.app` / `.dmg`；Windows：`.exe` 等，依配置而定）。
 
 首次 `tauri dev` 会编译 Rust 依赖，可能需要数分钟；之后启动会快很多。
+
+---
+
+## 发布（Git Tag → GitHub Actions）
+
+推送符合 `v*` 的版本 tag 后，会自动触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
+
+| 平台 | 产物 |
+|------|------|
+| macOS Apple Silicon | `.dmg`（`aarch64`） |
+| macOS Intel | `.dmg`（`x64`） |
+| Windows | NSIS 安装包（`.exe`） |
+
+产物会上传到对应 tag 的 **GitHub Release（草稿）**，确认无误后再在 Releases 页点 Publish。
+
+### 发布前检查
+
+1. 三个文件的版本号保持一致：
+   - `package.json`
+   - `src-tauri/tauri.conf.json`
+   - `src-tauri/Cargo.toml`
+2. 功能在本地验证通过：`npm run tauri:build`
+3. 相关改动已合并到 `main` 并推送到远程
+
+### 打 tag 并触发打包
+
+版本号示例以 `0.1.0` 为例（tag 必须带 `v` 前缀）：
+
+```bash
+# 1. 确认当前在 main 且工作区干净
+git checkout main
+git pull
+git status
+
+# 2. 创建并推送 tag（推送后自动开始 CI 打包）
+git tag -a v0.1.0 -m "release: v0.1.0"
+git push origin v0.1.0
+```
+
+预发布可用带连字符的 tag，例如 `v0.2.0-beta.1`（CI 会标记为 prerelease）。
+
+### 发布后
+
+1. 打开仓库 **Actions**，确认 `Release` 工作流全部变绿
+2. 打开 **Releases**，编辑该 tag 对应的草稿：补充更新说明、检查附件是否齐全
+3. 点击 **Publish release**
+
+也可在 Actions 里手动运行 `Release`，并填写已存在的 tag（如 `v0.1.0`）重新打包上传。
+
+### 仓库权限
+
+若 CI 报 `Resource not accessible by integration`，到仓库 **Settings → Actions → General → Workflow permissions**，勾选 **Read and write permissions**。
 
 ### 提交规范（可选）
 
