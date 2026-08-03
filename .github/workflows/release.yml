@@ -1,4 +1,4 @@
-# 推送版本 tag（如 v0.1.0）后自动打包，并创建 GitHub Release（草稿）
+# 推送版本 tag（如 v0.1.0）后自动打包，并发布带安装包的 GitHub Release
 name: Release
 
 on:
@@ -21,12 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # 一个通用 DMG（Intel + Apple Silicon）
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            args: --target universal-apple-darwin --bundles dmg
+          # 一个 Windows 安装包 EXE
           - platform: windows-latest
-            args: ''
+            args: --bundles nsis
 
     runs-on: ${{ matrix.platform }}
 
@@ -81,11 +81,11 @@ jobs:
           releaseBody: |
             ## 下载安装
 
-            - **macOS Apple Silicon**：`QuickKit_*_aarch64.dmg`
-            - **macOS Intel**：`QuickKit_*_x64.dmg`
-            - **Windows**：`QuickKit_*_x64-setup.exe`
+            - **macOS**：`QuickKit_*_universal.dmg`（Intel / Apple Silicon 通用）
+            - **Windows**：`QuickKit_*-setup.exe`
 
             macOS 若提示「已损坏」，请参考 README 中的 `xattr` 处理说明。
-          releaseDraft: true
+          # 直接正式发布，Assets 中会出现 .dmg / .exe（不是源码 zip）
+          releaseDraft: false
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           args: ${{ matrix.args }}

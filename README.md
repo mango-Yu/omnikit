@@ -122,15 +122,16 @@ npm run tauri:build  # 本地打包
 
 ## 发布（Git Tag → GitHub Actions）
 
-推送符合 `v*` 的版本 tag 后，会自动触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)：
+推送符合 `v*` 的版本 tag 后，会自动触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)，每次只产出两个安装包：
 
 | 平台 | 产物 |
 |------|------|
-| macOS Apple Silicon | `.dmg`（`aarch64`） |
-| macOS Intel | `.dmg`（`x64`） |
-| Windows | NSIS 安装包（`.exe`） |
+| macOS | 一个通用 `.dmg`（`universal`，Intel / Apple Silicon 均可） |
+| Windows | 一个 NSIS 安装包 `.exe` |
 
-产物会上传到对应 tag 的 **GitHub Release（草稿）**，确认无误后再在 Releases 页点 Publish。
+产物会上传到对应 tag 的 **GitHub Release**。打开 **Releases**（不是 Tags）即可下载 `.dmg` / `.exe`。
+
+> Tags 页里的 `Source code (zip/tar.gz)` 只是源码压缩包，**不是**安装包。安装包只出现在 Releases 的 Assets 里。
 
 ### 发布前检查
 
@@ -161,10 +162,12 @@ git push origin v0.1.0
 ### 发布后
 
 1. 打开仓库 **Actions**，确认 `Release` 工作流全部变绿
-2. 打开 **Releases**，编辑该 tag 对应的草稿：补充更新说明、检查附件是否齐全
-3. 点击 **Publish release**
+2. 打开 **Releases**（侧边或仓库首页右侧），检查 Assets 是否包含：
+   - `QuickKit_*_universal.dmg`
+   - `QuickKit_*-setup.exe`
+3. 不要到 **Tags** 页找安装包（那里只有源码压缩包）
 
-也可在 Actions 里手动运行 `Release`，并填写已存在的 tag（如 `v0.1.0`）重新打包上传。
+若某次没挂上安装包，可在 Actions 里手动运行 `Release`，填写已存在的 tag（如 `v0.1.0`）重新打包上传。
 
 ### 仓库权限
 
