@@ -3,19 +3,20 @@ import { open as openDialog, message } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { Lightbulb, X, FilePlus, FolderPlus, Search, Inbox } from 'lucide-react';
 import { RecordCard } from './components/RecordCard';
 import { CategorySidebar } from './components/CategorySidebar';
 import type { RecordItem, CategoryFilter } from './types';
 
 export const getCategory = (filename: string, is_dir?: boolean) => {
   const ext = filename.split('.').pop()?.toLowerCase();
-  
+
   // 处理 Mac 上的 Bundle 文件夹（这些后缀即便被识别为文件夹，也应按具体类型分类）
   const bundleExts = ['app', 'key', 'scpt'];
   if (is_dir && (!ext || !bundleExts.includes(ext))) {
     return '文件夹';
   }
-  
+
   if (!ext || ext === filename.toLowerCase()) return '其他文件';
 
   switch (ext) {
@@ -45,8 +46,8 @@ export const getCategory = (filename: string, is_dir?: boolean) => {
       return '数据库';
     case 'json': case 'yaml': case 'yml': case 'toml': case 'xml': case 'ini': case 'env': case 'plist': case 'conf': case 'code-profile':
       return '配置文件';
-    case 'js': case 'ts': case 'jsx': case 'tsx': case 'html': case 'css': case 'scss': case 'less': 
-    case 'py': case 'rs': case 'go': case 'java': case 'c': case 'cpp': case 'cs': case 'php': 
+    case 'js': case 'ts': case 'jsx': case 'tsx': case 'html': case 'css': case 'scss': case 'less':
+    case 'py': case 'rs': case 'go': case 'java': case 'c': case 'cpp': case 'cs': case 'php':
     case 'rb': case 'swift': case 'kt': case 'dart': case 'vue': case 'svelte':
       return '代码文件';
     case 'ttf': case 'otf': case 'woff': case 'woff2':
@@ -62,6 +63,7 @@ export default function QuickOpenApp() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOption, setSortOption] = useState<'time-desc' | 'time-asc' | 'name-asc' | 'name-desc'>('time-desc');
   const [isDragging, setIsDragging] = useState(false);
+  const [showTips, setShowTips] = useState(false);
 
   const fetchRecords = useCallback(async () => {
     try {
@@ -91,12 +93,12 @@ export default function QuickOpenApp() {
           const paths = event.payload.paths;
           let added = false;
           let skippedCount = 0;
-          
+
           for (const path of paths) {
             try {
               const is_dir = await invoke<boolean>('check_path_is_dir', { path });
               const name = path.split('/').pop() || path.split('\\').pop() || 'Untitled';
-              
+
               const newRecord: RecordItem = {
                 id: crypto.randomUUID(),
                 name: name,
@@ -114,13 +116,13 @@ export default function QuickOpenApp() {
               }
             }
           }
-          
+
           if (skippedCount > 0) {
             setTimeout(() => {
               message(`${skippedCount} 个文件/文件夹已存在，已跳过`, { title: '提示', kind: 'warning' }).catch(console.error);
             }, 100);
           }
-          
+
           if (added) {
             await fetchRecords();
           }
@@ -212,17 +214,17 @@ export default function QuickOpenApp() {
   });
 
   const sortedAndFilteredRecords = categoryFilteredRecords
-    .filter(r => 
-      r.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    .filter(r =>
+      r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.path.toLowerCase().includes(searchQuery.toLowerCase())
     )
     .sort((a, b) => {
       if (sortOption === 'name-asc') return a.name.localeCompare(b.name);
       if (sortOption === 'name-desc') return b.name.localeCompare(a.name);
-      
+
       const timeA = a.created_at ? new Date(a.created_at.replace(' ', 'T') + 'Z').getTime() : 0;
       const timeB = b.created_at ? new Date(b.created_at.replace(' ', 'T') + 'Z').getTime() : 0;
-      
+
       if (sortOption === 'time-asc') return timeA - timeB;
       return timeB - timeA;
     });
@@ -237,16 +239,18 @@ export default function QuickOpenApp() {
   }, {} as Record<string, RecordItem[]>);
 
   const selectedCategoryName = selectedFilter !== 'all' ? selectedFilter : null;
+  const totalCount = records.length;
+  const categoryCount = new Set(records.map(r => getCategory(r.name, r.is_dir))).size;
 
   const renderRecordGrid = (items: RecordItem[]) => (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
       {items.map(r => (
-        <RecordCard 
-          key={r.id} 
-          name={r.name} 
-          path={r.path} 
+        <RecordCard
+          key={r.id}
+          name={r.name}
+          path={r.path}
           is_dir={r.is_dir}
-          screenshot_path={r.screenshot_path} 
+          screenshot_path={r.screenshot_path}
           onClick={() => handleOpenPath(r.path)}
           onContextMenu={(e) => handleRevealPath(e, r.path)}
           onDelete={(e) => handleDelete(e, r.id)}
@@ -256,7 +260,7 @@ export default function QuickOpenApp() {
   );
 
   return (
-    <div 
+    <div
       className="flex h-screen overflow-hidden bg-gray-50 relative"
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -287,35 +291,55 @@ export default function QuickOpenApp() {
           </div>
         )}
 
-        <div className="flex-shrink-0 px-8 pt-8 pb-2">
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl font-bold text-gray-800 whitespace-nowrap">我的快开库</h1>
+        <div className="flex-shrink-0 px-8 pt-7 pb-3">
+          <div className="flex justify-between items-end mb-5">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800 whitespace-nowrap">我的快开库</h1>
+              <p className="text-xs text-gray-500 mt-1">
+                共 <span className="font-semibold text-gray-700">{totalCount}</span> 个项目 ·
+                <span className="font-semibold text-gray-700"> {categoryCount}</span> 个分类
+              </p>
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => addRecordFromDialog(false)}
-                className="bg-blue-600 text-white px-5 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition-colors whitespace-nowrap font-medium"
+                title="使用提示"
+                onClick={() => setShowTips(v => !v)}
+                className={`p-2 rounded-lg border transition-colors ${showTips
+                    ? 'bg-amber-50 border-amber-200 text-amber-600'
+                    : 'bg-white border-gray-200 text-gray-500 hover:text-amber-500 hover:border-amber-200'
+                  }`}
               >
+                <Lightbulb size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => addRecordFromDialog(false)}
+                className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition-colors whitespace-nowrap font-medium"
+              >
+                <FilePlus size={16} />
                 添加文件
               </button>
               <button
                 type="button"
                 onClick={() => addRecordFromDialog(true)}
-                className="bg-white text-blue-700 border border-blue-200 px-5 py-2 rounded-lg shadow-sm hover:bg-blue-50 transition-colors whitespace-nowrap font-medium"
+                className="inline-flex items-center gap-1.5 bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg shadow-sm hover:bg-blue-50 transition-colors whitespace-nowrap font-medium"
               >
+                <FolderPlus size={16} />
                 添加文件夹
               </button>
             </div>
           </div>
 
-          <div className="flex gap-3 mb-6">
+          <div className="flex gap-3 mb-4">
             <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
                 type="text"
                 placeholder="搜索名称或路径..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-2 pr-10 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
+                className="w-full pl-9 pr-10 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
               />
               {searchQuery && (
                 <button
@@ -324,44 +348,82 @@ export default function QuickOpenApp() {
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none p-1 rounded-full hover:bg-gray-100 transition-colors"
                   title="清空"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
+                  <X size={14} />
                 </button>
               )}
             </div>
             <select
               value={sortOption}
               onChange={(e) => setSortOption(e.target.value as typeof sortOption)}
-              className="px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm text-gray-700 cursor-pointer outline-none min-w-[140px]"
+              className="px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm text-gray-700 cursor-pointer outline-none min-w-[150px] transition-shadow"
             >
-              <option value="time-desc">添加时间 (最新)</option>
-              <option value="time-asc">添加时间 (最早)</option>
+              <option value="time-desc">添加时间（最新）</option>
+              <option value="time-asc">添加时间（最早）</option>
               <option value="name-asc">文件名称 (A-Z)</option>
               <option value="name-desc">文件名称 (Z-A)</option>
             </select>
           </div>
-          
-          <div className="mb-2 text-sm text-gray-600 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-            <p className="font-semibold text-gray-800 mb-2">💡 使用提示</p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>左侧 <span className="font-semibold text-blue-600">分类树</span> 可自定义层级，点击分类过滤右侧卡片。</li>
-              <li><span className="font-semibold">支持拖拽</span>：可以直接将外部文件或文件夹拖拽到窗口中快速添加。</li>
-              <li><span className="font-semibold">左键点击卡片</span>：按系统默认方式打开文件，或在访达/资源管理器中打开文件夹。</li>
-              <li><span className="font-semibold">右键点击卡片</span>：在访达 (Mac) 或资源管理器 (Windows) 中定位位置。</li>
-            </ul>
-          </div>
+
+          {showTips && (
+            <div className="mb-2 text-sm text-gray-600 bg-amber-50/60 p-4 rounded-xl border border-amber-100 relative animate-fade-in-down">
+              <button
+                type="button"
+                onClick={() => setShowTips(false)}
+                className="absolute top-2.5 right-2.5 text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-white/60 transition-colors"
+                title="收起"
+              >
+                <X size={14} />
+              </button>
+              <p className="font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+                <Lightbulb size={14} className="text-amber-500" />
+                使用提示
+              </p>
+              <ul className="list-disc list-inside space-y-1 leading-relaxed">
+                <li>左侧 <span className="font-semibold text-blue-600">分类树</span> 可自定义层级，点击分类过滤右侧卡片。</li>
+                <li><span className="font-semibold">支持拖拽</span>：将外部文件或文件夹拖到窗口中即可快速添加。</li>
+                <li><span className="font-semibold">左键点击卡片</span>：按系统默认方式打开文件，或在访达/资源管理器中打开文件夹。</li>
+                <li><span className="font-semibold">右键点击卡片</span>：在访达 (Mac) 或资源管理器 (Windows) 中定位位置。</li>
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 py-4">
           {sortedAndFilteredRecords.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-              <p className="text-lg">暂无记录</p>
-              <p className="text-sm mt-2">
-                {selectedCategoryName
-                  ? `「${selectedCategoryName}」分类下暂无记录`
-                  : '点击右上角「添加文件」或「添加文件夹」开始使用'}
+              <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                <Inbox size={36} className="text-gray-300" />
+              </div>
+              <p className="text-base font-medium text-gray-500">
+                {searchQuery
+                  ? '没有匹配的记录'
+                  : selectedCategoryName
+                    ? `「${selectedCategoryName}」分类下暂无记录`
+                    : '库中还没有记录'}
               </p>
+              {!searchQuery && !selectedCategoryName && (
+                <div className="flex gap-2 mt-5">
+                  <button
+                    type="button"
+                    onClick={() => addRecordFromDialog(false)}
+                    className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    <FilePlus size={15} />
+                    添加文件
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addRecordFromDialog(true)}
+                    className="inline-flex items-center gap-1.5 bg-white text-blue-700 border border-blue-200 px-4 py-2 rounded-lg shadow-sm hover:bg-blue-50 transition-colors text-sm font-medium"
+                  >
+                    <FolderPlus size={15} />
+                    添加文件夹
+                  </button>
+                </div>
+              )}
+              {!searchQuery && !selectedCategoryName && (
+                <p className="text-xs text-gray-400 mt-3">或将文件直接拖入窗口</p>
+              )}
             </div>
           ) : selectedFilter === 'all' ? (
             <div className="space-y-8">

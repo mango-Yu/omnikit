@@ -92,15 +92,15 @@ const getFileIcon = (filename: string) => {
 
 export const RecordCard: React.FC<RecordCardProps> = ({ name, path, is_dir, screenshot_path, onClick, onContextMenu, onDelete }) => {
   return (
-    <div 
-      className="group relative border rounded-xl shadow-sm p-4 flex flex-col items-center hover:shadow-md transition-shadow cursor-pointer bg-white"
+    <div
+      className="group relative border rounded-xl shadow-sm p-4 flex flex-col items-center hover:shadow-lg hover:-translate-y-0.5 hover:border-blue-200 transition-all duration-200 cursor-pointer bg-white"
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
       {onDelete && (
         <button
           onClick={onDelete}
-          className="absolute top-2 right-2 p-1.5 bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm shadow-sm"
+          className="absolute top-2 right-2 p-1.5 bg-white/90 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-150 backdrop-blur-sm shadow-sm hover:scale-110"
           title="删除此记录"
         >
           <Trash2 size={16} />
@@ -109,16 +109,18 @@ export const RecordCard: React.FC<RecordCardProps> = ({ name, path, is_dir, scre
       {screenshot_path ? (
         <img src={screenshot_path} alt={name} className="w-full h-32 object-cover mb-3 rounded-lg border border-gray-100" loading="lazy" />
       ) : (
-        <div className="w-full h-32 bg-slate-50 hover:bg-slate-100 transition-colors mb-3 flex flex-col items-center justify-center rounded-lg border border-slate-100">
+        <div className="w-full h-32 bg-gradient-to-br from-slate-50 to-slate-100 group-hover:from-blue-50/50 group-hover:to-blue-50 transition-colors mb-3 flex flex-col items-center justify-center rounded-lg border border-slate-100 group-hover:border-blue-100">
           {is_dir && !['app', 'key', 'scpt'].includes(name.split('.').pop()?.toLowerCase() || '') ? (
-            <Folder size={48} className="text-amber-500" />
+            <Folder size={48} className="text-amber-500 transition-transform duration-200 group-hover:scale-110" />
           ) : (
-            getFileIcon(name)
+            <div className="transition-transform duration-200 group-hover:scale-110">
+              {getFileIcon(name)}
+            </div>
           )}
         </div>
       )}
-      <h3 
-        className="font-bold text-sm w-full text-gray-800 break-all leading-snug"
+      <h3
+        className="font-semibold text-sm w-full text-gray-800 break-all leading-snug line-clamp-2 group-hover:text-blue-700 transition-colors"
         title={name}
       >
         {name}

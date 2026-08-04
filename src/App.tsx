@@ -14,11 +14,11 @@ export default function App() {
   const [activeView, setActiveView] = useState<AppView>('quickopen');
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
-      <nav className="w-16 flex-shrink-0 bg-slate-900 flex flex-col items-center py-4 gap-2 border-r border-slate-800">
-        <div className="mb-4 flex flex-col items-center text-white text-[10px] font-bold tracking-wider opacity-60 leading-tight">
-          <span>OmniKit</span>
-          <span className="text-[8px] font-normal opacity-80 mt-0.5">All your tools, one place</span>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <nav className="w-[72px] flex-shrink-0 bg-slate-900 flex flex-col items-center py-4 gap-1.5 border-r border-slate-800">
+        <div className="mb-3 flex flex-col items-center text-white text-[10px] font-bold tracking-wider opacity-70 leading-tight">
+          <span>Omni</span>
+          <span>Kit</span>
         </div>
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
           const active = activeView === id;
@@ -28,27 +28,29 @@ export default function App() {
               type="button"
               title={label}
               onClick={() => setActiveView(id)}
-              className={`flex flex-col items-center gap-1 w-12 py-2.5 rounded-xl transition-colors ${
+              className={`flex flex-col items-center gap-1 w-[60px] py-2.5 rounded-xl transition-all duration-150 ${
                 active
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              <Icon size={22} />
-              <span className="text-[10px] leading-tight text-center">{label}</span>
+              <Icon size={20} />
+              <span className="text-[11px] leading-tight text-center px-0.5 break-keep">
+                {label}
+              </span>
             </button>
           );
         })}
       </nav>
 
-      <div className="flex-1 min-w-0 h-full overflow-hidden">
-        <div className={activeView === 'quickopen' ? 'h-full' : 'hidden'}>
+      <main className="flex-1 min-w-0 h-full overflow-hidden">
+        <div className={activeView === 'quickopen' ? 'h-full animate-fade-in' : 'hidden'}>
           <QuickOpenApp />
         </div>
-        <div className={activeView === 'gif-composer' ? 'h-full' : 'hidden'}>
+        <div className={activeView === 'gif-composer' ? 'h-full animate-fade-in' : 'hidden'}>
           <GifComposer />
         </div>
-      </div>
+      </main>
     </div>
   );
 }

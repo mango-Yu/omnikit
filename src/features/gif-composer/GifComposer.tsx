@@ -22,13 +22,17 @@ export default function GifComposer() {
         </header>
 
         <section className="toolbar">
-          <button id="pick" type="button">选择图片</button>
-          <button id="clear" type="button" className="ghost">清空列表</button>
-          <label className="delay">
-            每帧间隔（毫秒）
-            <input id="delay-ms" type="number" min={20} step={10} defaultValue={2000} />
-          </label>
-          <button id="export" type="button" className="primary">生成并保存 GIF</button>
+          <div className="toolbar-group">
+            <button id="pick" type="button">选择图片</button>
+            <button id="clear" type="button" className="ghost">清空列表</button>
+          </div>
+          <div className="toolbar-group">
+            <label className="delay">
+              每帧间隔（毫秒）
+              <input id="delay-ms" type="number" min={20} step={10} defaultValue={2000} />
+            </label>
+            <button id="export" type="button" className="primary">生成并保存 GIF</button>
+          </div>
         </section>
 
         <section id="record-panel" className="pro-record-panel" hidden>
