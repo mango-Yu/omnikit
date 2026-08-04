@@ -16,7 +16,10 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
       <nav className="w-16 flex-shrink-0 bg-slate-900 flex flex-col items-center py-4 gap-2 border-r border-slate-800">
-        <div className="mb-4 text-white text-xs font-bold tracking-wider opacity-60">QuickKit</div>
+        <div className="mb-4 flex flex-col items-center text-white text-[10px] font-bold tracking-wider opacity-60 leading-tight">
+          <span>OmniKit</span>
+          <span className="text-[8px] font-normal opacity-80 mt-0.5">All your tools, one place</span>
+        </div>
         {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
           const active = activeView === id;
           return (

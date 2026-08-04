@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# QuickKit 一键发版：同步版本号 → 提交 → 推送 → 打 tag → 触发 GitHub Actions 打包
+# OmniKit 一键发版：同步版本号 → 提交 → 推送 → 打 tag → 触发 GitHub Actions 打包
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -189,10 +189,10 @@ cargo.write_text("".join(out))
 
 lock = Path("src-tauri/Cargo.lock")
 text = lock.read_text()
-old = f'name = "quickkit"\nversion = "{current_cargo}"'
-new = f'name = "quickkit"\nversion = "{version}"'
+old = f'name = "omnikit"\nversion = "{current_cargo}"'
+new = f'name = "omnikit"\nversion = "{version}"'
 if old not in text:
-    raise SystemExit(f"未在 Cargo.lock 中找到 quickkit@{current_cargo}")
+    raise SystemExit(f"未在 Cargo.lock 中找到 omnikit@{current_cargo}")
 lock.write_text(text.replace(old, new, 1))
 PY
 

@@ -1,6 +1,8 @@
-# QuickKit
+# OmniKit
 
-QuickKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工具集，将 **快开（QuickOpen）** 与 **GIF 合成器** 整合在同一应用中。左侧导航可一键切换模块，数据与功能彼此独立。
+> All your tools, one place
+
+OmniKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工具集，将 **快开（QuickOpen）** 与 **GIF 合成器** 整合在同一应用中。左侧导航可一键切换模块，数据与功能彼此独立。
 
 ---
 
@@ -107,8 +109,8 @@ cargo --version
 ## 开发与打包
 
 ```bash
-git clone https://github.com/mango-Yu/quickkit.git
-cd quickkit
+git clone https://github.com/mango-Yu/omnikit.git
+cd omnikit
 npm install
 npm run tauri:dev    # 开发（热更新）
 npm run tauri:build  # 本地打包
@@ -177,8 +179,8 @@ git push origin v0.1.0
 
 1. 打开仓库 **Actions**，确认 `Release` 工作流全部变绿
 2. 打开 **Releases**（侧边或仓库首页右侧），检查 Assets 是否包含：
-   - `QuickKit_*_universal.dmg`
-   - `QuickKit_*-setup.exe`
+   - `OmniKit_*_universal.dmg`
+   - `OmniKit_*-setup.exe`
 3. 不要到 **Tags** 页找安装包（那里只有源码压缩包）
 
 若某次没挂上安装包，可在 Actions 里手动运行 `Release`，填写已存在的 tag（如 `v0.1.0`）重新打包上传。
@@ -202,7 +204,7 @@ git config core.hooksPath .githooks
 从网上下载的未签名应用可能触发 Gatekeeper。在信任来源的前提下，对 `.app` 执行：
 
 ```bash
-xattr -cr "/Applications/QuickKit.app"
+xattr -cr "/Applications/OmniKit.app"
 ```
 
 也可在 Finder 中**右键 → 打开 → 打开**。路径请按实际安装位置调整。

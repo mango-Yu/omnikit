@@ -77,12 +77,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ steps.meta.outputs.tag }}
-          releaseName: QuickKit ${{ steps.meta.outputs.tag }}
+          releaseName: OmniKit ${{ steps.meta.outputs.tag }}
           releaseBody: |
             ## 下载安装
 
-            - **macOS**：`QuickKit_*_universal.dmg`（Intel / Apple Silicon 通用）
-            - **Windows**：`QuickKit_*-setup.exe`
+            - **macOS**：`OmniKit_*_universal.dmg`（Intel / Apple Silicon 通用）
+            - **Windows**：`OmniKit_*-setup.exe`
 
             macOS 若提示「已损坏」，请参考 README 中的 `xattr` 处理说明。
           # 直接正式发布，Assets 中会出现 .dmg / .exe（不是源码 zip）
