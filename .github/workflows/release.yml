@@ -108,6 +108,7 @@ jobs:
             - **Windows**：`OmniKit_*-setup.exe`
 
             macOS 若提示「已损坏」，请参考 README 中的 `xattr` 处理说明。
+            录屏：开发版和安装包要分别授权；勾选后必须 Command+Q 退出再打开。
           # 直接正式发布，Assets 中会出现 .dmg / .exe（不是源码 zip）
           releaseDraft: false
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}

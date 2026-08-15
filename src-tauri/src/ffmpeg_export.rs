@@ -213,40 +213,60 @@ mod macos_tcc {
         fn CGPreflightScreenCaptureAccess() -> bool;
     }
 
-    /// 每个进程只弹一次系统授权框。开关打开后当前进程仍无权限，再调
-    /// `CGRequestScreenCaptureAccess` 只会反复弹窗。
+    /// 每个进程只弹一次系统授权框。未公证的安装包上 `CGPreflight` 经常误报
+    /// 未授权；再调 `CGRequestScreenCaptureAccess` 就会出现「已经勾了还弹窗」。
     static REQUESTED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
 
     const RESTART_REQUIRED: &str = "屏幕录制权限需要重新启动后才能生效。\n\
 请按 Command+Q 完全退出 OmniKit（只关窗口不够），再重新打开后开始录屏。\n\
-开发调试（tauri dev）和安装包是两套独立身份，系统设置里可能有两条「OmniKit」，请确认打开的是当前这个安装版。";
+开发版和 GitHub 安装包是两套身份，系统设置里可能有多条「OmniKit」，请全部打开。";
 
     const NOT_GRANTED: &str = "未获得屏幕录制权限。请打开「系统设置 → 隐私与安全性 → 录屏与系统录音」，\
-勾选当前这个 OmniKit，然后按 Command+Q 完全退出再打开。开发版与安装包需要分别授权。";
+勾选当前这个 OmniKit，然后按 Command+Q 完全退出再打开。";
 
     pub fn ensure() -> Result<(), String> {
-        if preflight() {
+        if has_access() {
             return Ok(());
         }
 
-        // 已经向系统要过一次：不要再弹系统框，否则会出现「设置里已打开仍不停提示」。
+        // 已经向系统要过一次：不要再弹系统框。
         if REQUESTED_THIS_PROCESS.swap(true, Ordering::SeqCst) {
-            return Err(RESTART_REQUIRED.into());
+            return if has_access() {
+                Ok(())
+            } else {
+                Err(RESTART_REQUIRED.into())
+            };
         }
 
         let granted = unsafe { CGRequestScreenCaptureAccess() };
-        if preflight() {
+        if has_access() {
             return Ok(());
         }
         if granted {
-            // Request 在部分系统上会返回 true，但本进程仍截不到屏，必须重启。
             return Err(RESTART_REQUIRED.into());
         }
         Err(NOT_GRANTED.into())
     }
 
-    fn preflight() -> bool {
-        unsafe { CGPreflightScreenCaptureAccess() }
+    fn has_access() -> bool {
+        if unsafe { CGPreflightScreenCaptureAccess() } {
+            return true;
+        }
+        // ad-hoc / 未公证包上 Preflight 常为 false。能读到其他 App 窗口标题，说明已经授权。
+        can_read_other_window_titles()
+    }
+
+    fn can_read_other_window_titles() -> bool {
+        let Ok(windows) = xcap::Window::all() else {
+            return false;
+        };
+        windows.iter().any(|w| {
+            let app = w.app_name().unwrap_or_default();
+            if app.is_empty() || app == "OmniKit" || app == "Window Server" || app == "Dock" {
+                return false;
+            }
+            !w.title().unwrap_or_default().trim().is_empty()
+        })
     }
 }
 
