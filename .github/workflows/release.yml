@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的 tag（须已存在，如 v0.1.0）'
-        required: true
+        description: '要发布的 tag（如 v0.2.0）。留空则用 package.json 版本；不存在则基于当前分支创建'
+        required: false
         type: string
 
 permissions:
@@ -36,8 +36,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 手动触发时检出指定 tag
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -74,10 +73,17 @@ jobs:
         id: meta
         shell: bash
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG="v$(node -p "require('./package.json').version")"
+            fi
           else
             TAG="${{ github.ref_name }}"
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if [[ "$TAG" == *-* ]]; then
@@ -85,6 +91,7 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "resolved tag=$TAG"
 
       - name: Build and upload to GitHub Release
         uses: tauri-apps/tauri-action@v1
@@ -93,6 +100,7 @@ jobs:
         with:
           tagName: ${{ steps.meta.outputs.tag }}
           releaseName: OmniKit ${{ steps.meta.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
           releaseBody: |
             ## 下载安装
 

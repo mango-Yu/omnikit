@@ -192,7 +192,7 @@ git push origin v0.1.0
    - `OmniKit_*-setup.exe`
 3. 不要到 **Tags** 页找安装包（那里只有源码压缩包）
 
-若某次没挂上安装包，可在 Actions 里手动运行 `Release`，填写已存在的 tag（如 `v0.1.0`）重新打包上传。
+若某次没挂上安装包，可在 Actions 里手动运行 `Release`：选 `main`，tag 可留空（会用 `package.json` 的版本，例如 `v0.2.0`）。会按当前分支打包并创建/更新对应 GitHub Release。
 
 ### 仓库权限
 
