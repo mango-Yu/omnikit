@@ -1,10 +1,11 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
-import { readFile, writeFile } from "@tauri-apps/plugin-fs";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { appDataDir, join } from "@tauri-apps/api/path";
 
-import { createScreenCaptureVideo, ScreenGifRecorder } from "./screen_record";
-import { pickRecordingRegion } from "./record_region_picker";
+import { recordToGif, stopRecordGif, ScreenCropRect } from "./screen_record";
 import { createGifFromVideo } from "./video_to_gif";
+import { pickRecordTarget, showRecordFloater } from "./record_target_picker";
 
 type Item = { id: string; path: string };
 
@@ -14,6 +15,9 @@ type EditionInfo = {
 };
 
 export function initGifComposer(root: HTMLElement): void {
+  // React StrictMode（dev）会把 useEffect 跑两遍，避免重复绑定事件监听
+  if (root.dataset.gifComposerInit === "1") return;
+  root.dataset.gifComposerInit = "1";
 const listEl = root.querySelector<HTMLUListElement>("#image-list")!;
 const delayInput = root.querySelector<HTMLInputElement>("#delay-ms")!;
 const statusEl = root.querySelector<HTMLParagraphElement>("#status")!;
@@ -37,9 +41,11 @@ const videoMaxSecInput = root.querySelector<HTMLInputElement>("#video-max-sec")!
 const inTauri = isTauri();
 
 const PRO_RECORD_MAX_SEC = 60;
-const VIDEO_MAX_SEC = 30;
-const VIDEO_EXTENSIONS = ["mp4", "m4v"];
-const VIDEO_FORMAT_LABEL = "MP4 / M4V（推荐 H.264 编码）";
+const VIDEO_MAX_SEC = 60;
+const VIDEO_EXTENSIONS = [
+  "mp4", "m4v", "mov", "avi", "mkv", "webm", "flv", "wmv", "mpg", "mpeg", "ts", "m2ts", "3gp", "ogv",
+];
+const VIDEO_FORMAT_LABEL = "常见视频格式（MP4 / MOV / AVI / MKV / WebM 等，FFmpeg 自动解码）";
 
 function guardTauri(): boolean {
   if (!inTauri) {
@@ -79,9 +85,9 @@ async function loadEdition(): Promise<void> {
   // editionBadge.classList.add("pro");
   recordHeading.textContent = "Pro · 录屏转 GIF";
   recordIntro.textContent =
-    "系统共享后可在预览中框选区域与大小。最长 " +
+    "通过 FFmpeg 抓屏（macOS avfoundation / Windows gdigrab / Linux x11grab）。最长 " +
     String(PRO_RECORD_MAX_SEC) +
-    " 秒，导出无水印。在系统共享控件中结束共享也会自动停止。";
+    " 秒，导出无水印。先抓一张全屏快照，用户在快照上框选区域后开始录制。";
   recordMaxSecInput.readOnly = false;
   recordMaxSecInput.disabled = false;
   recordMaxSecInput.min = "5";
@@ -95,16 +101,68 @@ async function loadEdition(): Promise<void> {
   videoMaxSecInput.readOnly = true;
   videoMaxSecInput.disabled = false;
   videoMaxSecInput.value = String(VIDEO_MAX_SEC);
+  videoMaxSecInput.max = String(VIDEO_MAX_SEC);
   syncPickButtonState();
   syncRecordControls();
   syncVideoControls();
+
+  // 监听 Rust 端发来的实时进度事件
+  setupProgressListeners();
 }
 
-let screenRecorder: ScreenGifRecorder | null = null;
+let activeRecordRunId = 0;
 let isVideoConverting = false;
+let progressBarEl: HTMLElement | null = null;
+let progressBarFillEl: HTMLElement | null = null;
+
+function setProgress(done: number, total: number, show: boolean): void {
+  if (!progressBarEl || !progressBarFillEl) {
+    progressBarEl = document.getElementById("progress-bar");
+    progressBarFillEl = document.getElementById("progress-bar-fill");
+  }
+  if (!progressBarEl || !progressBarFillEl) return;
+  progressBarEl.style.display = show ? "block" : "none";
+  if (!show) {
+    progressBarFillEl.style.width = "0%";
+    return;
+  }
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  progressBarFillEl.style.width = `${pct}%`;
+}
+
+function setupProgressListeners(): void {
+  if (!isTauri()) return;
+  void listen<{ done: number; total: number; finished?: boolean }>(
+    "video-to-gif-progress",
+    (e) => {
+      if (e.payload.finished) {
+        setProgress(0, 0, false);
+        return;
+      }
+      setProgress(e.payload.done, e.payload.total, e.payload.total > 0);
+      if (e.payload.total > 0) {
+        setStatus(`正在用 FFmpeg 抽帧… ${e.payload.done}/${e.payload.total}`);
+      }
+    },
+  );
+
+  void listen<{ done: number; total: number; finished?: boolean }>(
+    "record-progress",
+    (e) => {
+      if (e.payload.finished) {
+        setProgress(0, 0, false);
+        return;
+      }
+      setProgress(e.payload.done, e.payload.total, e.payload.total > 0);
+      if (e.payload.total > 0) {
+        setStatus(`正在录屏并编码 GIF… ${e.payload.done}/${e.payload.total} 帧`);
+      }
+    },
+  );
+}
 
 function syncRecordControls(): void {
-  const running = screenRecorder?.isRunning ?? false;
+  const running = activeRecordRunId > 0;
   recordStartBtn.disabled = running;
   recordStopBtn.disabled = !running;
   recordFpsInput.disabled = running;
@@ -120,33 +178,6 @@ function syncVideoControls(): void {
 function isAllowedVideoPath(path: string): boolean {
   const ext = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
   return !!ext && VIDEO_EXTENSIONS.includes(ext);
-}
-
-type SaveGifOptions = {
-  defaultPath?: string;
-  cancelMessage?: string;
-};
-
-async function saveGifToDisk(bytes: Uint8Array | null, context: string, options: SaveGifOptions = {}): Promise<void> {
-  if (!bytes?.length) {
-    setStatus(`${context}：没有可保存的画面帧。`, true);
-    return;
-  }
-  const outPath = await save({
-    defaultPath: options.defaultPath ?? "screen-record.gif",
-    filters: [{ name: "GIF", extensions: ["gif"] }],
-  });
-  if (!outPath) {
-    setStatus(options.cancelMessage ?? "已取消保存录屏 GIF。");
-    return;
-  }
-  setStatus("正在写入文件…");
-  try {
-    await writeFile(outPath, bytes);
-    setStatus(`${context} 已保存：${outPath}`);
-  } catch (err) {
-    setStatus(String(err), true);
-  }
 }
 
 let items: Item[] = [];
@@ -339,7 +370,7 @@ exportBtn.addEventListener("click", async () => {
 
 recordStartBtn.addEventListener("click", async () => {
   if (!guardTauri()) return;
-  if (screenRecorder?.isRunning) return;
+  if (activeRecordRunId > 0) return;
 
   const fps = Math.min(24, Math.max(1, Number(recordFpsInput.value) || 8));
   const maxSeconds = Math.min(PRO_RECORD_MAX_SEC, Math.max(5, Number(recordMaxSecInput.value) || PRO_RECORD_MAX_SEC));
@@ -347,23 +378,11 @@ recordStartBtn.addEventListener("click", async () => {
   recordStartBtn.disabled = true;
   recordFpsInput.disabled = true;
   recordMaxSecInput.disabled = true;
-  setStatus("正在请求屏幕共享…");
 
-  let capture: Awaited<ReturnType<typeof createScreenCaptureVideo>> | null = null;
-  try {
-    capture = await createScreenCaptureVideo(fps);
-  } catch (err) {
-    recordStartBtn.disabled = false;
-    recordFpsInput.disabled = false;
-    recordMaxSecInput.disabled = false;
-    setStatus(String(err), true);
-    return;
-  }
-
-  setStatus("在预览中框选要录入 GIF 的范围，或点「整幅画面」后「开始录制」。");
-  const pick = await pickRecordingRegion(capture.video);
-  if (!pick) {
-    capture.stream.getTracks().forEach((t) => t.stop());
+  // 1) 让用户选「整屏 / 选窗口 / 手动框选」并确定区域
+  setStatus("选择录制范围（整屏 / 选窗口 / 手动框选）…");
+  const target = await pickRecordTarget();
+  if (!target) {
     recordStartBtn.disabled = false;
     recordFpsInput.disabled = false;
     recordMaxSecInput.disabled = false;
@@ -371,57 +390,103 @@ recordStartBtn.addEventListener("click", async () => {
     return;
   }
 
-  dismissRecordRegionOverlay = pick.dismissOverlay;
-  pick.onStopRequested(() => {
-    recordStopBtn.click();
-  });
-  const cropRect = pick.crop;
-
-  screenRecorder = new ScreenGifRecorder();
+  // 2) 立即把 ffmpeg 录到临时路径，停止时再让用户选保存位置
+  let tempPath: string;
   try {
-    await screenRecorder.start({
+    const dir = await appDataDir();
+    const tmpDir = await join(dir, "tmp");
+    const filename = `screen-record-${Date.now()}.gif`;
+    tempPath = await join(tmpDir, filename);
+  } catch (err) {
+    target.dismissOverlay?.();
+    recordStartBtn.disabled = false;
+    recordFpsInput.disabled = false;
+    recordMaxSecInput.disabled = false;
+    setStatus(`无法获取临时目录：${String(err)}`, true);
+    return;
+  }
+
+  const runId = Date.now();
+  activeRecordRunId = runId;
+  syncRecordControls();
+  if (target.dismissOverlay) {
+    dismissRecordRegionOverlay = target.dismissOverlay;
+  }
+  target.onStopRequested?.(() => {
+    if (activeRecordRunId === runId) recordStopBtn.click();
+  });
+
+  // 整屏 / 选窗口 模式没有 picker overlay，必须用浮层告诉用户"正在录屏"+ 给个停止入口。
+  // region 模式 picker panel 自带停止按钮，这里也挂一份浮层做兜底（双保险）。
+  const hideFloater = showRecordFloater(target.label, () => {
+    if (activeRecordRunId === runId) recordStopBtn.click();
+  });
+
+  setStatus(`正在录屏（${target.label}）… 录完点「停止」会弹保存框。`);
+  const cropRect: ScreenCropRect = target.rect;
+
+  try {
+    await recordToGif({
+      outputPath: tempPath,
       fps,
       maxSeconds,
       maxLongEdge: 960,
       cropRect,
-      existingCapture: capture,
-      onAutoEnd: async (bytes, reason) => {
-        clearRecordRegionOverlay();
-        screenRecorder = null;
-        syncRecordControls();
-        if (!bytes?.length) {
-          if (reason === "error") setStatus("录屏采集过程出现异常。", true);
-          else if (reason === "stream") setStatus("屏幕共享已结束（若尚未保存，可能没有有效画面）。");
-          else setStatus("未达到可保存的帧数。");
-          return;
-        }
-        const label =
-          reason === "limit" ? "已达时长上限" : reason === "stream" ? "共享已结束" : "采集结束";
-        await saveGifToDisk(bytes, label);
-      },
     });
-    syncRecordControls();
-    setStatus("正在录屏… 完成后点「停止并保存 GIF」，或在系统中结束共享。");
+    // recordToGif 自身会等到 ffmpeg 结束（用户点 stop）。到这一步说明已停止。
+    if (activeRecordRunId === runId) {
+      // 询问保存位置
+      const dest = await save({
+        defaultPath: "screen-record.gif",
+        filters: [{ name: "GIF", extensions: ["gif"] }],
+      });
+      activeRecordRunId = 0;
+      clearRecordRegionOverlay();
+      syncRecordControls();
+      if (!dest) {
+        // 用户取消保存：删除临时文件
+        try {
+          await invoke("delete_gif_file_cmd", { path: tempPath });
+        } catch {
+          /* ignore */
+        }
+        setStatus("已取消保存录屏 GIF。");
+        return;
+      }
+      try {
+        await invoke("move_gif_file_cmd", { src: tempPath, dest });
+        setStatus(`录屏 GIF 已保存：${dest}`);
+      } catch (err) {
+        setStatus(`录屏 GIF 保存失败：${String(err)}，临时文件仍在：${tempPath}`, true);
+      }
+    }
   } catch (err) {
-    clearRecordRegionOverlay();
-    screenRecorder = null;
-    capture.stream.getTracks().forEach((t) => t.stop());
-    syncRecordControls();
-    setStatus(String(err), true);
+    if (activeRecordRunId === runId) {
+      activeRecordRunId = 0;
+      clearRecordRegionOverlay();
+      syncRecordControls();
+      // 失败时也清理临时文件
+      try {
+        await invoke("delete_gif_file_cmd", { path: tempPath });
+      } catch {
+        /* ignore */
+      }
+      setStatus(String(err), true);
+    }
+  } finally {
+    hideFloater();
   }
 });
 
 recordStopBtn.addEventListener("click", async () => {
   if (!guardTauri()) return;
-  const rec = screenRecorder;
-  if (!rec?.isRunning) return;
-
-  clearRecordRegionOverlay();
-  setStatus("正在编码 GIF…");
-  const bytes = rec.stopAndBytes();
-  screenRecorder = null;
-  syncRecordControls();
-  await saveGifToDisk(bytes, "录屏");
+  if (activeRecordRunId === 0) return;
+  try {
+    setStatus("正在停止录屏…");
+    await stopRecordGif();
+  } catch (err) {
+    setStatus(String(err), true);
+  }
 });
 
 videoPickBtn.addEventListener("click", async () => {
@@ -444,34 +509,34 @@ videoPickBtn.addEventListener("click", async () => {
   }
 
   const fps = Math.min(24, Math.max(1, Number(videoFpsInput.value) || 8));
+  const outPath = await save({
+    defaultPath: "video.gif",
+    filters: [{ name: "GIF", extensions: ["gif"] }],
+  });
+  if (!outPath) {
+    setStatus("已取消保存视频 GIF。");
+    return;
+  }
+
   isVideoConverting = true;
   syncVideoControls();
-  setStatus("正在读取视频并生成 GIF…");
+  setProgress(0, 1, true);
+  setStatus("正在用 FFmpeg 抽帧并生成 GIF…");
 
-  let videoObjectUrl: string | null = null;
   try {
-    // convertFileSrc 在 Windows WebView2 下常与页面不同源，drawImage + getImageData 会污染画布；
-    // 读入内存后使用 blob URL 与页面同源，可正常抽帧。
-    const fileBytes = await readFile(selected);
-    const blob = new Blob([fileBytes], { type: "video/mp4" });
-    videoObjectUrl = URL.createObjectURL(blob);
-    const bytes = await createGifFromVideo({
-      videoSrc: videoObjectUrl,
+    await createGifFromVideo({
+      inputPath: selected,
+      outputPath: outPath,
       fps,
       maxSeconds: VIDEO_MAX_SEC,
       maxLongEdge: 960,
-      onProgress: (done, total) => {
-        setStatus(`正在转换视频… ${done}/${total} 帧`);
-      },
     });
-    await saveGifToDisk(bytes, "视频 GIF", {
-      defaultPath: "video.gif",
-      cancelMessage: "已取消保存视频 GIF。",
-    });
+    setProgress(0, 0, false);
+    setStatus(`视频 GIF 已保存：${outPath}`);
   } catch (err) {
+    setProgress(0, 0, false);
     setStatus(String(err), true);
   } finally {
-    if (videoObjectUrl) URL.revokeObjectURL(videoObjectUrl);
     isVideoConverting = false;
     syncVideoControls();
   }

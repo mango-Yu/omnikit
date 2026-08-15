@@ -170,6 +170,22 @@ button.danger {
   color: #f97316;
 }
 
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 0 0 12px;
+}
+
+.progress-bar-fill {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #6366f1);
+  transition: width 120ms linear;
+}
+
 .pro-record-panel {
   margin: 0 0 12px;
   padding: 12px 14px;
@@ -227,6 +243,248 @@ button.record-btn.primary {
   font-weight: 600;
 }
 
+/* 录屏：目标选择对话框（整屏 / 选窗口 / 手动框选） */
+.record-target-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110000;
+  background: rgba(15, 23, 42, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.record-target-panel {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  max-width: min(94vw, 720px);
+  width: 100%;
+  max-height: min(86vh, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
+  position: relative;
+  z-index: 110001;
+}
+
+.record-target-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.record-target-sub {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.record-target-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.record-target-card {
+  appearance: none;
+  text-align: left;
+  padding: 16px 16px 18px;
+  background: #f8fafc;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.15s ease, transform 0.05s ease, background 0.15s ease;
+}
+
+.record-target-card:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.record-target-card:active {
+  transform: translateY(1px);
+}
+
+.record-target-card-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #3b82f6;
+}
+
+.record-target-card-head {
+  font-weight: 650;
+  font-size: 0.98rem;
+}
+
+.record-target-card-desc {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.record-target-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 4px;
+}
+
+.record-target-btn {
+  appearance: none;
+  padding: 8px 18px;
+  border-radius: 9px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.record-target-btn:hover {
+  border-color: #3b82f6;
+}
+
+.record-target-btn.ghost {
+  background: transparent;
+}
+
+.record-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 6px;
+}
+
+.record-target-row {
+  appearance: none;
+  text-align: left;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.record-target-row:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.record-target-row-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.record-target-row-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  word-break: break-all;
+  color: #0f172a;
+}
+
+.record-target-row-app {
+  font-size: 0.72rem;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.record-target-row-size {
+  font-size: 0.74rem;
+  color: #64748b;
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+}
+
+.record-target-empty {
+  margin: 0;
+  text-align: center;
+  color: #64748b;
+  padding: 24px 8px;
+  font-size: 0.88rem;
+}
+
+/* 录屏中：整屏 / 选窗口 模式下的小浮层（不阻塞操作） */
+.record-status-floater {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100050;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 999px;
+  padding: 10px 14px 10px 16px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.4);
+  font-size: 0.9rem;
+}
+
+.record-status-floater .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  animation: record-pulse 1.2s ease-out infinite;
+}
+
+@keyframes record-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+.record-status-floater .label {
+  white-space: nowrap;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.record-status-floater .stop-btn {
+  appearance: none;
+  border: 1px solid #ef4444;
+  background: #ef4444;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.record-status-floater .stop-btn:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
 /* 录屏：框选区域浮层 */
 .record-region-backdrop {
   position: fixed;
@@ -237,6 +495,71 @@ button.record-btn.primary {
   align-items: center;
   justify-content: center;
   padding: 12px;
+}
+
+/* 全屏框选：配合 Rust 端 enter_region_picker_mode_cmd
+ * 主窗口临时全屏置顶，整个 webview 就是 picker 区域。
+ * stage 撑满 viewport（100vw × 100vh），canvas drawing buffer
+ * 等于 ffmpeg 抓屏的物理像素（1:1），所以 sel 即物理像素坐标。 */
+.record-region-backdrop.record-region-fullscreen {
+  background: transparent;
+  padding: 0;
+  display: block;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-stage {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: #000;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  touch-action: none;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  max-width: min(92vw, 520px);
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-title,
+.record-region-backdrop.record-region-fullscreen .record-region-hint {
+  color: #e2e8f0;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #f1f5f9;
+}
+
+.record-region-backdrop.record-region-fullscreen .record-region-btn.primary {
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  border-color: #1d4ed8;
+  color: #fff;
 }
 
 /* 录制阶段：视觉保留选框，但点击穿透到下方主界面（否则无法点「停止」） */

@@ -57,8 +57,8 @@ OmniKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工�
 - 设置**每帧间隔（毫秒）**，循环播放
 - 画布以**第一张图**为基准，其余图等比缩放并居中铺白底
 - 系统对话框选择路径导出 `.gif`
-- **录屏转 GIF**：共享屏幕后可框选区域；最长 60 秒、无水印
-- **视频转 GIF**：支持 MP4 / M4V（推荐 H.264），时长最长 30 秒
+- **录屏转 GIF**：通过 FFmpeg 抓屏（avfoundation / gdigrab / x11grab）；最长 60 秒、无水印；选区基于一张静态屏幕快照框选
+- **视频转 GIF**：通过 FFmpeg 解码任意常见视频格式（MP4 / M4V / MOV / AVI / MKV / WebM / FLV / WMV / TS 等），时长最长 60 秒
 
 ![主界面：多图合成与录屏转 GIF](1.png)
 
@@ -69,8 +69,17 @@ OmniKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工�
 ### 使用说明
 
 - GIF 每帧经颜色量化，体积与观感会有折中
-- **录屏**依赖 `getDisplayMedia`；macOS 需在「隐私与安全性 → 录屏与系统录音」中允许本应用，并在 `src-tauri/Info.plist` 中保留屏幕/摄像头/麦克风用途说明（后两项系统询问时可选「不允许」）
-- **视频转 GIF**使用 WebView 解码，不内置 FFmpeg，故仅支持 MP4 / M4V
+- **FFmpeg**：录屏与视频转 GIF 由 Rust 端通过 [ffmpeg-sidecar](https://crates.io/crates/ffmpeg-sidecar) 启动 FFmpeg 子进程完成。
+- **首次下载 ffmpeg**：未带二进制启动时，`ffmpeg-sidecar` 会自动从 GitHub Release 下载约 80MB 的静态构建。也可手动 `npm run ffmpeg:download` 提前下载。
+- **把 ffmpeg 打进安装包**（避免下载）：
+  1. `npm run ffmpeg:download:all`（或单独 `npm run ffmpeg:download -- --target=macos-arm64` 等）把三平台 ffmpeg 静态构建下载到 `resources/ffmpeg/`。
+  2. `npm run tauri:build` 时 Tauri 会自动把 `resources/ffmpeg/*` 拷到应用内（macOS: `*.app/Contents/Resources/_up_/ffmpeg/`，Windows: `resources/ffmpeg/`）。
+  3. 应用启动时 `src-tauri/src/lib.rs` 的 `locate_bundled_ffmpeg` 会优先找到内嵌二进制，写入 `FFMPEG_PATH` 环境变量，`ffmpeg_export::ensure_ffmpeg` 优先使用之；找不到时回退到 `ffmpeg-sidecar` 自动下载。
+- **录屏平台差异**：
+  - macOS：使用 `avfoundation`，录屏与系统录音需在「隐私与安全性」中允许本应用；屏幕设备索引默认 `1`（若失败可手动调整 `src-tauri/src/ffmpeg_export.rs`）。
+  - Windows：使用 `gdigrab` 抓 desktop，无需额外配置。
+  - Linux：使用 `x11grab`，需安装 `xdg-desktop-portal` 与 xcb 库。
+- **视频转 GIF**使用 FFmpeg 解码，**支持几乎所有常见格式**（不再受 WebView 解码能力限制）：MP4、M4V、MOV、AVI、MKV、WebM、FLV、WMV、MPEG、TS、M2TS、3GP、OGV 等。
 
 ---
 
@@ -224,7 +233,11 @@ xattr -cr "/Applications/OmniKit.app"
 **GIF 合成器**
 
 - [x] 多图合成、录屏转 GIF、视频转 GIF
-- [ ] 更多视频格式（需评估是否引入 FFmpeg）
+- [x] 视频转 GIF 改用 FFmpeg（支持 MP4 / MOV / AVI / MKV / WebM 等所有常见格式）
+- [x] 录屏改用 FFmpeg（脱离浏览器 getDisplayMedia）
+- [x] 视频转 GIF / 录屏 实时进度事件（`video-to-gif-progress` / `record-progress`）
+- [x] 录屏实时预览：3 FPS 持续刷新，框选时画面不再冻结
+- [x] FFmpeg 静态构建打包进安装包（`npm run ffmpeg:download:all`）
 
 ---
 

@@ -1,6 +1,9 @@
-import { trimBlackMargins } from "./screen_record";
+// 录屏区域框选 UI。
+// 原实现基于 HTMLVideoElement 实时预览；改用 FFmpeg 录屏后，
+// 改为基于一张静态截图（HTMLImageElement）作为预览，用户在上面框选区域。
+//
+// 框选后返回的 crop 是图片像素坐标（即 ffmpeg 抓屏快照的原始尺寸）。
 
-/** 视频帧内的裁剪矩形（像素，相对 video.videoWidth/Height） */
 export type PixelCropRect = { x: number; y: number; w: number; h: number };
 
 /** 用户确认选区后的结果；录制过程中浮层保持显示，结束后请调用 dismissOverlay */
@@ -17,23 +20,37 @@ type DragMode = "none" | "create" | "move" | "resize";
 type Corner = "nw" | "ne" | "sw" | "se";
 
 /**
- * 在实时预览上框选区域。
- * - 取消（或 Esc）返回 null，调用方应停止 MediaStream。
- * - 确认后返回 crop 与 dismissOverlay：**录制结束前勿调用 dismissOverlay**，绿色选框会一直在预览上。
+ * 在屏幕快照（HTMLImageElement）上框选区域。
+ * - 取消（或 Esc）返回 null，调用方应停止后续流程。
+ * - 确认后返回 crop 与 dismissOverlay。
+ *
+ * `getFrameUrl` 是一个返回 `string`（URL） 的函数；调用方应保证每调用一次
+ * 返回的 URL 都指向最新的预览帧（通常加 cache-bust 时间戳）。picker 内部
+ * 会以约 5 FPS 主动刷新 `image.src`，让画面"接近实时"。
+ *
+ * `fullscreen: true` 时不再把图片按比例缩到 maxW/maxH，而是以屏幕物理像素 1:1
+ * 渲染到整个 webview（配合 Rust 端把主窗口临时全屏置顶），让用户能在整张屏幕
+ * 上框选区域。`vw/vh` 与 `dispW/dispH` 都用物理像素，1:1 对应 ffmpeg 抓屏输出。
  */
 export function pickRecordingRegion(
-  video: HTMLVideoElement,
+  image: HTMLImageElement,
+  imageWidth: number,
+  imageHeight: number,
+  getFrameUrl?: () => string,
+  fullscreen: boolean = false,
 ): Promise<RecordingRegionPickResult | null> {
   return new Promise((resolve) => {
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
+    const vw = imageWidth;
+    const vh = imageHeight;
     if (!vw || !vh) {
       resolve(null);
       return;
     }
 
-    const maxW = Math.min(window.innerWidth * 0.92, 1200);
-    const maxH = window.innerHeight * 0.68;
+    // 全屏模式：drawing buffer = 物理像素，CSS 尺寸 = viewport 尺寸。
+    // 显示器以 devicePixelRatio > 1 渲染时，CSS px 与物理 px 一一对应，sel 即物理像素。
+    const maxW = fullscreen ? vw : Math.min(window.innerWidth * 0.92, 1200);
+    const maxH = fullscreen ? vh : window.innerHeight * 0.68;
     let dispW = maxW;
     let dispH = (vh / vw) * dispW;
     if (dispH > maxH) {
@@ -46,7 +63,7 @@ export function pickRecordingRegion(
     let dismissed = false;
     let recordingLocked = false;
 
-    const dismissOverlay = (): void => {
+    let dismissOverlay = (): void => {
       if (dismissed) return;
       dismissed = true;
       window.removeEventListener("keydown", onKey);
@@ -54,18 +71,29 @@ export function pickRecordingRegion(
     };
 
     const backdrop = document.createElement("div");
-    backdrop.className = "record-region-backdrop";
+    backdrop.className = fullscreen
+      ? "record-region-backdrop record-region-fullscreen"
+      : "record-region-backdrop";
 
     const panel = document.createElement("div");
     panel.className = "record-region-panel";
-    panel.style.position = "relative";
+    panel.style.position = fullscreen ? "absolute" : "relative";
+    if (fullscreen) {
+      // 全屏时面板浮在右下角，避免遮挡框选区
+      panel.style.left = "auto";
+      panel.style.top = "auto";
+      panel.style.right = "16px";
+      panel.style.bottom = "16px";
+      panel.style.maxWidth = "min(92vw, 520px)";
+    }
 
     const title = document.createElement("p");
     title.className = "record-region-title";
     title.style.cursor = "move";
     title.title = "按住此处可拖动面板";
-    title.textContent =
-      "拖动绿色框调整区域与大小（可拖内部移动、拖四角缩放），选好后点「开始录制」；需整幅画面点「整幅画面」。";
+    title.textContent = fullscreen
+      ? "在整张屏幕上拖动绿色框选定录制范围，松开后点「开始录制」（Esc 取消）。"
+      : "拖动绿色框调整区域与大小（可拖内部移动、拖四角缩放），选好后点「开始录制」；需整幅画面点「整幅画面」。";
 
     let isDraggingPanel = false;
     let panelTx = 0;
@@ -94,7 +122,9 @@ export function pickRecordingRegion(
       panelTy += e.clientY - mouseStartY;
       try {
         title.releasePointerCapture(e.pointerId);
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     };
 
     title.addEventListener("pointerup", onTitleUp);
@@ -105,48 +135,44 @@ export function pickRecordingRegion(
 
     const stage = document.createElement("div");
     stage.className = "record-region-stage";
-    stage.style.width = `${dispW}px`;
-    stage.style.height = `${dispH}px`;
+    if (fullscreen) {
+      // 全屏：stage 撑满整个 webview viewport。
+      // 1) CSS 尺寸 = 100vw / 100vh
+      stage.style.width = "100vw";
+      stage.style.height = "100vh";
+      // 2) drawing buffer 仍是物理像素（与 ffmpeg 抓屏 1:1）
+      //    —— 由 canvas.width/height 控制，下面会设置。
+    } else {
+      stage.style.width = `${dispW}px`;
+      stage.style.height = `${dispH}px`;
+    }
 
-    video.classList.add("record-region-video");
-    video.style.width = "100%";
-    video.style.height = "100%";
-    video.style.objectFit = "contain"; // 改为 contain 保持原始比例
-    video.style.display = "block";
-    stage.appendChild(video);
+    image.classList.add("record-region-image");
+    image.style.width = "100%";
+    image.style.height = "100%";
+    image.style.objectFit = "contain";
+    image.style.display = "block";
+    if (fullscreen) {
+      image.style.background = "#000";
+    }
+    stage.appendChild(image);
 
     const canvas = document.createElement("canvas");
-    canvas.width = dispW;
-    canvas.height = dispH;
+    if (fullscreen) {
+      // drawing buffer 尺寸 = 物理像素（vw/vh）
+      canvas.width = dispW;
+      canvas.height = dispH;
+      // CSS 尺寸 = viewport（stage 已经 100vw/100vh）
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    } else {
+      canvas.width = dispW;
+      canvas.height = dispH;
+    }
     canvas.className = "record-region-canvas";
     stage.appendChild(canvas);
 
     let sel = { x: 0, y: 0, w: dispW, h: dispH };
-
-    // 自动检测并裁掉四边黑边，使绿框初始就贴合实际内容
-    try {
-      const probe = document.createElement("canvas");
-      probe.width = vw;
-      probe.height = vh;
-      const pctx = probe.getContext("2d", { willReadFrequently: true });
-      if (pctx) {
-        pctx.drawImage(video, 0, 0, vw, vh);
-        const probeData = pctx.getImageData(0, 0, vw, vh).data;
-        // 这里的 trimBlackMargins 需要在顶部 import
-        const trimmed = trimBlackMargins(probeData, vw, vh);
-        if (trimmed) {
-          sel = {
-            x: (trimmed.x / vw) * dispW,
-            y: (trimmed.y / vh) * dispH,
-            w: (trimmed.w / vw) * dispW,
-            h: (trimmed.h / vh) * dispH,
-          };
-        }
-      }
-    } catch {
-      // 忽略探测失败
-    }
-
     let mode: DragMode = "none";
     let corner: Corner | null = null;
     let startMX = 0;
@@ -402,8 +428,7 @@ export function pickRecordingRegion(
       btnCancel.style.display = "none";
       btnOk.style.display = "none";
       btnStop.style.display = "inline-block";
-      
-      /** 录制中不拦截指针，避免挡住主窗口「停止并保存」等按钮 */
+
       backdrop.classList.add("record-region-passthrough");
       title.textContent =
         "录制中：绿框内为写入 GIF 的区域（按住此处可拖动本面板）。完成后请点击下方「停止并保存 GIF」。";
@@ -431,6 +456,37 @@ export function pickRecordingRegion(
       }
     };
     window.addEventListener("keydown", onKey);
+
+    // 实时刷新预览：每 200ms 重新拉一次 ffmpeg 覆写的同一张 PNG。
+    // 录制锁定时（用户已点"开始录制"）停止刷新。
+    let pollTimer: number | null = null;
+    if (getFrameUrl) {
+      const tick = (): void => {
+        if (dismissed || recordingLocked) {
+          if (pollTimer !== null) {
+            window.clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          return;
+        }
+        try {
+          image.src = getFrameUrl();
+        } catch {
+          /* ignore */
+        }
+      };
+      tick();
+      pollTimer = window.setInterval(tick, 200);
+      // 用包装后的 dismissOverlay 同时清掉轮询
+      const origDismiss = dismissOverlay;
+      dismissOverlay = (): void => {
+        if (pollTimer !== null) {
+          window.clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        origDismiss();
+      };
+    }
 
     redraw();
   });

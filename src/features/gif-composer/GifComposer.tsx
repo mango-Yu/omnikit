@@ -64,7 +64,7 @@ export default function GifComposer() {
             </label>
             <label className="pro-record-label">
               最长（秒）
-              <input id="video-max-sec" type="number" min={1} max={20} step={1} defaultValue={20} readOnly />
+              <input id="video-max-sec" type="number" min={1} max={60} step={1} defaultValue={60} readOnly />
             </label>
             <button id="video-pick" type="button" className="record-btn primary">
               选择视频并保存 GIF
@@ -73,6 +73,9 @@ export default function GifComposer() {
         </section>
 
         <p id="status" className="status" />
+        <div id="progress-bar" className="progress-bar" style={{ display: "none" }}>
+          <div id="progress-bar-fill" className="progress-bar-fill" />
+        </div>
         <ul id="image-list" className="grid" />
       </main>
     </div>
