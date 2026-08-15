@@ -235,7 +235,6 @@ async function pickWindow(): Promise<WindowInfo | null> {
 }
 
 async function pickRegionViaFullscreenPicker(
-  previewPath: string,
   previewWidth: number,
   previewHeight: number,
   getFrameUrl: () => string,
@@ -348,7 +347,6 @@ export async function pickRecordTarget(): Promise<RecordTargetResult | null> {
   const preview = await startPreview();
   if (!preview) return null;
   const result = await pickRegionViaFullscreenPicker(
-    preview.previewPath,
     preview.previewWidth,
     preview.previewHeight,
     preview.getFrameUrl,
