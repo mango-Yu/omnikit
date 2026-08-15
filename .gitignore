@@ -15,6 +15,7 @@ dist-ssr
 *.local
 resources/ffmpeg/__tmp__/
 resources/ffmpeg/ffmpeg-dl.*
+resources/ffmpeg/ffmpeg-*
 !resources/ffmpeg/.gitkeep
 
 # Editor directories and files
