@@ -30,6 +30,8 @@ type WindowInfo = {
   y: number;
   width: number;
   height: number;
+  logicalWidth: number;
+  logicalHeight: number;
   isMinimized: boolean;
 };
 
@@ -205,7 +207,7 @@ async function pickWindow(): Promise<WindowInfo | null> {
         }
         const size = el("div", {
           className: "record-target-row-size",
-          text: `${w.width} × ${w.height}  @ (${w.x}, ${w.y})`,
+          text: `${w.logicalWidth} × ${w.logicalHeight}`,
         });
         row.append(rowHead, size);
         row.addEventListener("click", () => finish(w));
@@ -318,13 +320,13 @@ export async function pickRecordTarget(): Promise<RecordTargetResult | null> {
     }
     return {
       rect: {
-        x: info.x,
-        y: info.y,
+        x: 0,
+        y: 0,
         w: info.width,
         h: info.height,
       },
       source: "screen",
-      label: `整屏 ${info.width}×${info.height}`,
+      label: `整屏 ${Math.round(info.width / info.scaleFactor)}×${Math.round(info.height / info.scaleFactor)}`,
     };
   }
 
@@ -338,7 +340,7 @@ export async function pickRecordTarget(): Promise<RecordTargetResult | null> {
     return {
       rect: { x: win.x, y: win.y, w: win.width, h: win.height },
       source: "window",
-      label: `窗口「${win.title}」 ${win.width}×${win.height}`,
+      label: `窗口「${win.title}」 ${win.logicalWidth}×${win.logicalHeight}`,
     };
   }
 

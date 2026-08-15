@@ -25,10 +25,14 @@ struct WindowInfo {
     id: u32,
     title: String,
     app_name: String,
+    /// ffmpeg 裁切用：相对主屏、物理像素
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+    /// 界面展示用：逻辑点（Retina 上约为物理像素 / scale）
+    logical_width: u32,
+    logical_height: u32,
     is_minimized: bool,
 }
 
@@ -107,19 +111,27 @@ async fn record_to_gif_cmd(
 ) -> Result<(), String> {
     let region = args.region.map(|r| (r[0], r[1], r[2], r[3]));
     let app_clone = app.clone();
-    ffmpeg_export::record_to_gif(
-        &args.output_path,
-        args.fps,
-        args.max_long_edge,
-        args.max_seconds,
-        region,
-        &mut |done, total| {
-            let _ = app_clone.emit(
-                "record-progress",
-                serde_json::json!({ "done": done, "total": total }),
-            );
-        },
-    )?;
+    let output_path = args.output_path;
+    let fps = args.fps;
+    let max_long_edge = args.max_long_edge;
+    let max_seconds = args.max_seconds;
+    tauri::async_runtime::spawn_blocking(move || {
+        ffmpeg_export::record_to_gif(
+            &output_path,
+            fps,
+            max_long_edge,
+            max_seconds,
+            region,
+            &mut |done, total| {
+                let _ = app_clone.emit(
+                    "record-progress",
+                    serde_json::json!({ "done": done, "total": total }),
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|e| format!("录屏任务异常：{e}"))??;
     let _ = app.emit(
         "record-progress",
         serde_json::json!({ "done": 0, "total": 0, "finished": true }),
@@ -250,22 +262,41 @@ fn list_recordable_windows_cmd(
         if title == "OmniKit" {
             continue;
         }
-        let width = w.width().unwrap_or(0);
-        let height = w.height().unwrap_or(0);
-        if width < 120 || height < 80 {
+        let logical_width = w.width().unwrap_or(0);
+        let logical_height = w.height().unwrap_or(0);
+        if logical_width < 120 || logical_height < 80 {
             continue;
         }
-        let app = w.app_name().unwrap_or_default();
-        let x = w.x().unwrap_or(0);
-        let y = w.y().unwrap_or(0);
+        let logical_x = w.x().unwrap_or(0);
+        let logical_y = w.y().unwrap_or(0);
+        // kCGWindowBounds 是逻辑点；ffmpeg avfoundation 抓到的是物理像素。
+        // Retina (scale=2) 上若不换算，裁切区域只有窗口的 1/4。
+        let (scale, mon_x, mon_y) = w
+            .current_monitor()
+            .ok()
+            .map(|m| {
+                (
+                    m.scale_factor().unwrap_or(1.0) as f64,
+                    m.x().unwrap_or(0) as f64,
+                    m.y().unwrap_or(0) as f64,
+                )
+            })
+            .unwrap_or((1.0, 0.0, 0.0));
+        let x = ((logical_x as f64 - mon_x) * scale).round() as i32;
+        let y = ((logical_y as f64 - mon_y) * scale).round() as i32;
+        let width = ((logical_width as f64) * scale).round() as u32;
+        let height = ((logical_height as f64) * scale).round() as u32;
+        let app_name = w.app_name().unwrap_or_default();
         let info = WindowInfo {
             id: w.id().unwrap_or(0),
             title,
-            app_name: app,
-            x,
-            y,
+            app_name,
+            x: x.max(0),
+            y: y.max(0),
             width,
             height,
+            logical_width,
+            logical_height,
             is_minimized: w.is_minimized().unwrap_or(false),
         };
         if let Some((mw, mh)) = main_size {

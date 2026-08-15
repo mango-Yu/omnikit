@@ -76,7 +76,7 @@ OmniKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工�
   2. `npm run tauri:build` 时 Tauri 会自动把 `resources/ffmpeg/*` 拷到应用内（macOS: `*.app/Contents/Resources/_up_/ffmpeg/`，Windows: `resources/ffmpeg/`）。
   3. 应用启动时 `src-tauri/src/lib.rs` 的 `locate_bundled_ffmpeg` 会优先找到内嵌二进制，写入 `FFMPEG_PATH` 环境变量，`ffmpeg_export::ensure_ffmpeg` 优先使用之；找不到时回退到 `ffmpeg-sidecar` 自动下载。
 - **录屏平台差异**：
-  - macOS：使用 `avfoundation`，录屏与系统录音需在「隐私与安全性」中允许本应用；屏幕设备索引默认 `1`（若失败可手动调整 `src-tauri/src/ffmpeg_export.rs`）。
+  - macOS：在 OmniKit 进程内截屏（xcap），会弹出系统「屏幕录制」授权；请在「系统设置 → 隐私与安全性 → 屏幕录制」中允许本应用。
   - Windows：使用 `gdigrab` 抓 desktop，无需额外配置。
   - Linux：使用 `x11grab`，需安装 `xdg-desktop-portal` 与 xcb 库。
 - **视频转 GIF**使用 FFmpeg 解码，**支持几乎所有常见格式**（不再受 WebView 解码能力限制）：MP4、M4V、MOV、AVI、MKV、WebM、FLV、WMV、MPEG、TS、M2TS、3GP、OGV 等。

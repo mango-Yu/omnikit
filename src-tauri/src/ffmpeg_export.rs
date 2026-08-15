@@ -17,7 +17,8 @@
 //! 全部自己解析。
 
 use gif::{DisposalMethod, Encoder, Frame, Repeat};
-use image::GenericImageView;
+use image::imageops;
+use image::{GenericImageView, RgbaImage};
 use once_cell::sync::OnceCell;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -25,6 +26,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// 全局初始化标记：保证 `auto_download` 只跑一次。
 static FFMPEG_READY: OnceCell<Result<(), String>> = OnceCell::new();
@@ -152,6 +155,23 @@ fn scale_filter(max_long_edge: u32) -> String {
     )
 }
 
+/// 确保输出文件的父目录存在（前端可能只拼路径、不建目录）。
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("无法创建输出目录 {}：{}", parent.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+/// GIF 延迟单位是 1/100 秒。8fps → 13cs，不要把毫秒直接写进去（否则会变成慢动作）。
+fn gif_delay_cs_for_fps(fps: u32) -> u16 {
+    let fps = fps.max(1);
+    ((100 + fps / 2) / fps).clamp(2, 50) as u16
+}
+
 /// 把 raw RGB 帧数据写入已初始化好的 GIF encoder。
 fn write_rgb_frame(
     encoder: &mut Encoder<File>,
@@ -160,20 +180,213 @@ fn write_rgb_frame(
     rgb: &[u8],
     delay_cs: u16,
 ) -> Result<(), String> {
-    // RGB -> RGBA
-    let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
-    for px in rgb.chunks_exact(3) {
-        rgba.push(px[0]);
-        rgba.push(px[1]);
-        rgba.push(px[2]);
-        rgba.push(255);
-    }
-    let mut frame = Frame::from_rgba_speed(width, height, &mut rgba, 10);
+    // speed 越大越快（1–30）；录屏要跟上实时帧率，质量让一点。
+    let mut frame = Frame::from_rgb_speed(width, height, rgb, 20);
     frame.delay = delay_cs;
-    frame.dispose = DisposalMethod::Background;
+    frame.dispose = DisposalMethod::Keep;
     encoder
         .write_frame(&frame)
         .map_err(|e| format!("写入 GIF 帧失败：{}", e))
+}
+
+#[cfg(target_os = "macos")]
+mod macos_tcc {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGRequestScreenCaptureAccess() -> bool;
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+
+    pub fn ensure() -> Result<(), String> {
+        unsafe {
+            if CGPreflightScreenCaptureAccess() {
+                return Ok(());
+            }
+            let granted = CGRequestScreenCaptureAccess();
+            if granted || CGPreflightScreenCaptureAccess() {
+                return Ok(());
+            }
+        }
+        Err(
+            "未获得屏幕录制权限。请打开「系统设置 → 隐私与安全性 → 屏幕录制」，勾选 OmniKit 后完全退出再打开。"
+                .into(),
+        )
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_primary_monitor() -> Result<xcap::Monitor, String> {
+    let mut monitors = xcap::Monitor::all().map_err(|e| format!("枚举显示器失败：{e}"))?;
+    if monitors.is_empty() {
+        return Err("未检测到显示器".into());
+    }
+    let idx = monitors
+        .iter()
+        .position(|m| m.is_primary().unwrap_or(false))
+        .unwrap_or(0);
+    Ok(monitors.remove(idx))
+}
+
+/// 前端传来的 region 是物理像素；xcap::capture_region 要逻辑点（相对显示器）。
+#[cfg(target_os = "macos")]
+fn macos_physical_to_logical_region(
+    monitor: &xcap::Monitor,
+    region: (u32, u32, u32, u32),
+) -> Result<(u32, u32, u32, u32), String> {
+    let scale = monitor.scale_factor().unwrap_or(1.0) as f64;
+    let scale = if scale > 0.1 { scale } else { 1.0 };
+    let mw = monitor.width().unwrap_or(0).max(1);
+    let mh = monitor.height().unwrap_or(0).max(1);
+    let (x, y, w, h) = region;
+    let mut lx = ((x as f64) / scale).floor() as u32;
+    let mut ly = ((y as f64) / scale).floor() as u32;
+    let mut lw = ((w as f64) / scale).ceil().max(1.0) as u32;
+    let mut lh = ((h as f64) / scale).ceil().max(1.0) as u32;
+    if lx >= mw {
+        lx = mw - 1;
+    }
+    if ly >= mh {
+        ly = mh - 1;
+    }
+    lw = lw.min(mw - lx).max(1);
+    lh = lh.min(mh - ly).max(1);
+    Ok((lx, ly, lw, lh))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_grab_frame(region: Option<(u32, u32, u32, u32)>) -> Result<RgbaImage, String> {
+    let monitor = macos_primary_monitor()?;
+    match region {
+        None => monitor
+            .capture_image()
+            .map_err(|e| format!("截取屏幕失败：{e}")),
+        Some(r) => {
+            let (x, y, w, h) = macos_physical_to_logical_region(&monitor, r)?;
+            monitor
+                .capture_region(x, y, w, h)
+                .map_err(|e| format!("截取区域失败：{e}"))
+        }
+    }
+}
+
+fn rgba_to_rgb(img: &RgbaImage) -> Vec<u8> {
+    let mut rgb = Vec::with_capacity(img.len() / 4 * 3);
+    for px in img.pixels() {
+        rgb.push(px[0]);
+        rgb.push(px[1]);
+        rgb.push(px[2]);
+    }
+    rgb
+}
+
+fn prepare_record_frame(img: RgbaImage, max_long_edge: u32) -> (u32, u32, Vec<u8>) {
+    let (w, h) = img.dimensions();
+    let (mut tw, mut th) = scaled_dims(w, h, max_long_edge);
+    tw = tw.max(2) & !1;
+    th = th.max(2) & !1;
+    let out = if tw == w && th == h {
+        img
+    } else {
+        // thumbnail 适合大图缩小，比 Triangle resize 快，录屏才能跟上 8fps
+        imageops::thumbnail(&img, tw, th)
+    };
+    let rgb = rgba_to_rgb(&out);
+    (out.width(), out.height(), rgb)
+}
+
+/// macOS：在本进程用 xcap 连续截屏。ffmpeg 子进程的 avfoundation 在新系统上
+/// 往往只吐出一帧，且不会弹出 OmniKit 的屏幕录制授权。
+#[cfg(target_os = "macos")]
+fn record_to_gif_macos(
+    output_path: &str,
+    fps: u32,
+    max_long_edge: u32,
+    max_seconds: u32,
+    region: Option<(u32, u32, u32, u32)>,
+    on_progress: &mut dyn FnMut(u32, u32),
+) -> Result<(), String> {
+    macos_tcc::ensure()?;
+    RECORD_CANCEL.store(false, Ordering::SeqCst);
+
+    let first = macos_grab_frame(region)?;
+    let (canvas_w, canvas_h, first_rgb) = prepare_record_frame(first, max_long_edge);
+    if canvas_w == 0 || canvas_h == 0 {
+        return Err("录屏首帧尺寸无效".into());
+    }
+
+    let max_frames = fps * max_seconds;
+    let target_delay = gif_delay_cs_for_fps(fps);
+    ensure_parent_dir(Path::new(output_path))?;
+    let file = File::create(Path::new(output_path))
+        .map_err(|e| format!("无法创建输出文件：{}", e))?;
+    let mut encoder = Encoder::new(file, canvas_w as u16, canvas_h as u16, &[])
+        .map_err(|e| e.to_string())?;
+    encoder
+        .set_repeat(Repeat::Infinite)
+        .map_err(|e| e.to_string())?;
+
+    write_rgb_frame(
+        &mut encoder,
+        canvas_w as u16,
+        canvas_h as u16,
+        &first_rgb,
+        target_delay,
+    )?;
+    let mut written: u32 = 1;
+    on_progress(written, max_frames);
+
+    let interval = Duration::from_millis((1000 / fps.max(1)) as u64);
+    let deadline = Instant::now() + Duration::from_secs(max_seconds as u64);
+
+    while written < max_frames && Instant::now() < deadline {
+        if RECORD_CANCEL.load(Ordering::SeqCst) {
+            break;
+        }
+        let tick = Instant::now();
+        match macos_grab_frame(region) {
+            Ok(img) => {
+                let (w, h, rgb) = prepare_record_frame(img, max_long_edge);
+                let frame_rgb = if w == canvas_w && h == canvas_h {
+                    rgb
+                } else {
+                    let dyn_img = image::RgbImage::from_raw(w, h, rgb)
+                        .ok_or_else(|| "无法重建帧缓冲".to_string())?;
+                    let resized = imageops::thumbnail(&dyn_img, canvas_w, canvas_h);
+                    resized.into_raw()
+                };
+                write_rgb_frame(
+                    &mut encoder,
+                    canvas_w as u16,
+                    canvas_h as u16,
+                    &frame_rgb,
+                    target_delay,
+                )?;
+                written += 1;
+                on_progress(written, max_frames);
+            }
+            Err(e) => {
+                log::warn!("录屏抓帧失败：{e}");
+                if written == 0 {
+                    return Err(e);
+                }
+            }
+        }
+        let remain = interval.saturating_sub(tick.elapsed());
+        if !remain.is_zero() {
+            let until = Instant::now() + remain;
+            while Instant::now() < until {
+                if RECORD_CANCEL.load(Ordering::SeqCst) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    if written < 2 {
+        return Err("录屏未产生足够的帧，请确认已允许屏幕录制权限后重试".into());
+    }
+    Ok(())
 }
 
 /// 从 ffmpeg 的 stdout 按 `width*height*3` 字节读取一帧 RGB。读到 0 字节返回 false。
@@ -341,7 +554,8 @@ pub fn video_to_gif(
         return Err("视频画面尺寸无效".into());
     }
 
-    let delay_cs: u16 = ((1000 / fps) / 10).max(1) as u16;
+    let delay_cs: u16 = gif_delay_cs_for_fps(fps);
+    ensure_parent_dir(Path::new(output_path))?;
     let file = File::create(Path::new(output_path))
         .map_err(|e| format!("无法创建输出文件：{}", e))?;
     let mut encoder = Encoder::new(file, canvas_w as u16, canvas_h as u16, &[])
@@ -419,12 +633,26 @@ pub fn record_to_gif(
     region: Option<(u32, u32, u32, u32)>,
     on_progress: &mut dyn FnMut(u32, u32),
 ) -> Result<(), String> {
-    ensure_ffmpeg()?;
-    let bin = ffmpeg_bin()?;
-
     let fps = fps.clamp(1, 30);
     let max_long_edge = max_long_edge.clamp(64, 4096);
     let max_seconds = max_seconds.clamp(1, 120);
+
+    #[cfg(target_os = "macos")]
+    {
+        return record_to_gif_macos(
+            output_path,
+            fps,
+            max_long_edge,
+            max_seconds,
+            region,
+            on_progress,
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+    ensure_ffmpeg()?;
+    let bin = ffmpeg_bin()?;
     let max_frames = fps * max_seconds;
 
     // 探测首帧尺寸：让 ffmpeg 抓一帧到 PNG，再读尺寸
@@ -439,17 +667,19 @@ pub fn record_to_gif(
 
     let mut probe_cmd = Command::new(&bin);
     probe_cmd.args(["-hide_banner", "-y"]);
-    configure_record_input_std(&mut probe_cmd, fps, max_long_edge, max_seconds, region);
+    configure_record_input_std(&mut probe_cmd, fps, max_long_edge, None, region)?;
     probe_cmd
         .args(["-frames:v", "1", "-update", "1"])
         .arg(&probe_path);
-    let probe_status = probe_cmd
-        .status()
+    probe_cmd.stderr(Stdio::piped());
+    let probe_output = probe_cmd
+        .output()
         .map_err(|e| format!("启动 ffmpeg 录屏探测失败：{}（bin={}）", e, bin.display()))?;
-    if !probe_status.success() {
-        return Err(format!(
-            "ffmpeg 录屏探测失败（exit={:?}）",
-            probe_status.code()
+    if !probe_output.status.success() {
+        return Err(ffmpeg_status_error(
+            "ffmpeg 录屏探测失败",
+            &probe_output.status,
+            &String::from_utf8_lossy(&probe_output.stderr),
         ));
     }
     let probe_img = image::open(&probe_png).map_err(|e| format!("无法读取探测帧：{}", e))?;
@@ -463,7 +693,7 @@ pub fn record_to_gif(
     // 启动完整录屏进程
     let mut cmd = Command::new(&bin);
     cmd.args(["-hide_banner", "-y"]);
-    configure_record_input_std(&mut cmd, fps, max_long_edge, max_seconds, region);
+    configure_record_input_std(&mut cmd, fps, max_long_edge, Some(max_seconds), region)?;
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -486,9 +716,12 @@ pub fn record_to_gif(
     let stderr_thread = std::thread::spawn(move || {
         let reader = BufReader::new(&mut stderr);
         for line in reader.lines().map_while(Result::ok) {
-            if line.starts_with("[error]") || line.starts_with("[fatal]") {
+            let lower = line.to_lowercase();
+            if lower.contains("error") || line.starts_with("[fatal]") {
                 log::error!("[ffmpeg record] {}", line);
                 stderr_failed_clone.store(true, Ordering::SeqCst);
+            } else {
+                log::debug!("[ffmpeg record] {}", line);
             }
         }
     });
@@ -502,7 +735,8 @@ pub fn record_to_gif(
     }
 
     // 读取 raw RGB 帧
-    let delay_cs: u16 = ((1000 / fps) / 10).max(1) as u16;
+    let delay_cs: u16 = gif_delay_cs_for_fps(fps);
+    ensure_parent_dir(Path::new(output_path))?;
     let file = File::create(Path::new(output_path))
         .map_err(|e| format!("无法创建输出文件：{}", e))?;
     let mut encoder = Encoder::new(file, canvas_w as u16, canvas_h as u16, &[])
@@ -517,7 +751,10 @@ pub fn record_to_gif(
     loop {
         if RECORD_CANCEL.load(Ordering::SeqCst) {
             kill_record_child();
-            return Err("录屏已取消".into());
+            if written == 0 {
+                return Err("录屏已取消".into());
+            }
+            break;
         }
         let frame_bytes = (canvas_w as usize) * (canvas_h as usize) * 3;
         frame_buf.resize(frame_bytes, 0);
@@ -550,36 +787,30 @@ pub fn record_to_gif(
         log::warn!("录屏过程中 ffmpeg 报告错误，但已成功写入 {} 帧", written);
     }
     Ok(())
+    }
 }
 
-/// 为不同平台注入录屏输入参数（macOS / Windows / Linux），写入 std::process::Command。
+/// 解析 ffmpeg stderr，把非 0 退出码转成可读错误。
+#[cfg(not(target_os = "macos"))]
+fn ffmpeg_status_error(label: &str, status: &std::process::ExitStatus, stderr: &str) -> String {
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        format!("{label}（exit={:?}）", status.code())
+    } else {
+        format!("{label}（exit={:?}）：{detail}", status.code())
+    }
+}
+
+/// 为不同平台注入录屏输入参数（Windows / Linux），写入 std::process::Command。
+/// `duration_secs` 为 None 时不限制时长（探测首帧用）。
+#[cfg(not(target_os = "macos"))]
 fn configure_record_input_std(
     cmd: &mut Command,
     fps: u32,
     max_long_edge: u32,
-    max_seconds: u32,
+    duration_secs: Option<u32>,
     region: Option<(u32, u32, u32, u32)>,
-) {
-    #[cfg(target_os = "macos")]
-    {
-        // avfoundation: "-i <screen_index>:" 0=摄像头，1=屏幕
-        let device = "1:".to_string();
-        if let Some((x, y, w, h)) = region {
-            cmd.args(["-f", "avfoundation", "-i", &device])
-                .args([
-                    "-vf",
-                    &format!(
-                        "crop={}:{}:{}:{},fps={},{}",
-                        w, h, x, y, fps, scale_filter(max_long_edge)
-                    ),
-                ])
-                .args(["-t", &max_seconds.to_string()]);
-        } else {
-            cmd.args(["-f", "avfoundation", "-i", &device])
-                .args(["-vf", &format!("fps={},{}", fps, scale_filter(max_long_edge))])
-                .args(["-t", &max_seconds.to_string()]);
-        }
-    }
+) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let input = "desktop".to_string();
@@ -588,12 +819,13 @@ fn configure_record_input_std(
                 "-f", "gdigrab", "-framerate", &fps.to_string(), "-offset_x", &x.to_string(),
                 "-offset_y", &y.to_string(), "-video_size", &format!("{}x{}", w, h), "-i", &input,
             ])
-            .args(["-t", &max_seconds.to_string()])
             .args(["-vf", &scale_filter(max_long_edge)]);
         } else {
             cmd.args(["-f", "gdigrab", "-framerate", &fps.to_string(), "-i", &input])
-                .args(["-t", &max_seconds.to_string()])
-                .args(["-vf", &format!("fps={},{}", fps, scale_filter(max_long_edge))]);
+                .args(["-vf", &scale_filter(max_long_edge)]);
+        }
+        if let Some(t) = duration_secs {
+            cmd.args(["-t", &t.to_string()]);
         }
     }
     #[cfg(target_os = "linux")]
@@ -607,9 +839,13 @@ fn configure_record_input_std(
         cmd.args([
             "-f", "x11grab", "-framerate", &fps.to_string(), "-video_size", &size, "-i", &input,
         ])
-        .args(["-t", &max_seconds.to_string()])
-        .args(["-vf", &format!("fps={},{}", fps, scale_filter(max_long_edge))]);
+        .args(["-vf", &scale_filter(max_long_edge)]);
+        if let Some(t) = duration_secs {
+            cmd.args(["-t", &t.to_string()]);
+        }
     }
+    let _ = (cmd, fps, max_long_edge, duration_secs, region);
+    Ok(())
 }
 
 /// 主动结束当前录屏进程（用户点停止时调用）。
@@ -621,6 +857,7 @@ fn configure_record_input_std(
 /// 会互相等待，导致前端 `await recordToGif()` 永远不返回、
 /// 保存对话框无法弹出。
 pub fn kill_record_child() {
+    RECORD_CANCEL.store(true, Ordering::SeqCst);
     if let Some(cell) = RECORD_CHILD.get() {
         if let Ok(mut guard) = cell.lock() {
             if let Some(child) = guard.as_mut() {
@@ -634,20 +871,63 @@ pub fn kill_record_child() {
     }
 }
 
+/// 把预览帧原子写入 PNG：先写临时文件再 rename，避免前端读到写到一半的文件。
+/// 长边超过 1920 时缩小，减轻 WKWebView 反复解码大图导致的闪烁。
+/// 返回值仍是屏幕原始宽高，框选坐标按物理像素映射。
+#[cfg(target_os = "macos")]
+fn save_preview_png_atomic(img: &RgbaImage, output_path: &str) -> Result<(u32, u32), String> {
+    let (orig_w, orig_h) = img.dimensions();
+    let (tw, th) = scaled_dims(orig_w, orig_h, 1920);
+    let scaled;
+    let to_save: &RgbaImage = if tw == orig_w && th == orig_h {
+        img
+    } else {
+        scaled = imageops::thumbnail(img, tw, th);
+        &scaled
+    };
+
+    let dest = Path::new(output_path);
+    let tmp = dest.with_file_name(format!(
+        ".{}.tmp.png",
+        dest.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("preview")
+    ));
+    to_save
+        .save(&tmp)
+        .map_err(|e| format!("无法写入预览：{e}"))?;
+    std::fs::rename(&tmp, dest).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("无法提交预览：{e}")
+    })?;
+    Ok((orig_w, orig_h))
+}
+
 /// 抓一帧屏幕快照，保存为 PNG，返回 (width, height)。
 fn capture_preview_png_inner(output_path: &str) -> Result<(u32, u32), String> {
-    let bin = ffmpeg_bin()?;
-    // 目标目录可能不存在（前端只拼了路径），先建好再让 ffmpeg 写
     if let Some(parent) = Path::new(output_path).parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("无法创建快照目录 {}：{}", parent.display(), e))?;
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        macos_tcc::ensure()?;
+        let img = macos_grab_frame(None)?;
+        return save_preview_png_atomic(&img, output_path);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+    let bin = ffmpeg_bin()?;
     let mut cmd = Command::new(&bin);
     cmd.args(["-hide_banner", "-y"]);
 
     #[cfg(target_os = "macos")]
     {
-        cmd.args(["-f", "avfoundation", "-i", "1:", "-frames:v", "1", "-update", "1"])
+        let device = macos_avfoundation_screen_device()?;
+        cmd.args(macos_avfoundation_input_args(&device, 1))
+            .args(["-frames:v", "1", "-update", "1"])
             .args(["-vf", &scale_filter(1920)])
             .arg(output_path);
     }
@@ -668,12 +948,14 @@ fn capture_preview_png_inner(output_path: &str) -> Result<(u32, u32), String> {
     }
 
     let status = cmd
-        .status()
+        .stderr(Stdio::piped())
+        .output()
         .map_err(|e| format!("启动 ffmpeg 抓屏快照失败：{}（bin={}）", e, bin.display()))?;
-    if !status.success() {
-        return Err(format!(
-            "ffmpeg 抓屏快照失败（exit={:?}）",
-            status.code()
+    if !status.status.success() {
+        return Err(ffmpeg_status_error(
+            "ffmpeg 抓屏快照失败",
+            &status.status,
+            &String::from_utf8_lossy(&status.stderr),
         ));
     }
 
@@ -681,6 +963,7 @@ fn capture_preview_png_inner(output_path: &str) -> Result<(u32, u32), String> {
         .map_err(|e| format!("无法读取快照：{}", e))?;
     let (w, h) = img.dimensions();
     Ok((w, h))
+    }
 }
 
 /// 启动"实时屏幕预览"：以 3 FPS 把当前桌面不断覆写到同一张 PNG。
@@ -688,8 +971,6 @@ fn capture_preview_png_inner(output_path: &str) -> Result<(u32, u32), String> {
 /// 该函数**启动后立即返回**，不会阻塞。
 /// 返回 (屏幕宽度, 屏幕高度)，对应被覆写的 PNG 的原始尺寸。
 pub fn start_record_preview(png_path: &str) -> Result<(u32, u32), String> {
-    ensure_ffmpeg()?;
-    // 若已有实例在跑，先杀掉
     if let Some(cell) = PREVIEW_CHILD.get() {
         if let Ok(mut guard) = cell.lock() {
             if let Some(c) = guard.as_mut() {
@@ -699,19 +980,40 @@ pub fn start_record_preview(png_path: &str) -> Result<(u32, u32), String> {
             *guard = None;
         }
     }
+    PREVIEW_CANCEL.store(true, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(40));
     PREVIEW_CANCEL.store(false, Ordering::SeqCst);
 
-    // 先快速抓一帧，确保前端能立刻看到画面
     let (w, h) = capture_preview_png_inner(png_path)?;
 
-    // 再启动持续覆写进程：3 FPS，updateflag=1 表示一直覆写同一文件
+    #[cfg(target_os = "macos")]
+    {
+        let path = png_path.to_string();
+        thread::spawn(move || {
+            while !PREVIEW_CANCEL.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(330));
+                if PREVIEW_CANCEL.load(Ordering::SeqCst) {
+                    break;
+                }
+                if let Ok(img) = macos_grab_frame(None) {
+                    let _ = save_preview_png_atomic(&img, &path);
+                }
+            }
+        });
+        return Ok((w, h));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+    ensure_ffmpeg()?;
     let bin = ffmpeg_bin()?;
     let mut cmd = Command::new(&bin);
     cmd.args(["-hide_banner", "-y"]);
     #[cfg(target_os = "macos")]
     {
-        cmd.args(["-f", "avfoundation", "-i", "1:"])
-            .args(["-vf", &format!("fps=3,{}", scale_filter(1920))])
+        let device = macos_avfoundation_screen_device()?;
+        cmd.args(macos_avfoundation_input_args(&device, 3))
+            .args(["-vf", &scale_filter(1920)])
             .args(["-update", "1"])
             .arg(png_path);
     }
@@ -741,6 +1043,7 @@ pub fn start_record_preview(png_path: &str) -> Result<(u32, u32), String> {
         *guard = Some(child);
     }
     Ok((w, h))
+    }
 }
 
 /// 主动停止实时预览进程。

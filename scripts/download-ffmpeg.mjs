@@ -26,16 +26,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, "..");
 const OUT_DIR = resolve(PROJECT_ROOT, "resources", "ffmpeg");
 
-// BtbN nightly 静态构建（GPL，开箱即用）
-// 国内下载慢时可设置环境变量切换镜像：
+// Windows / Linux：BtbN nightly 静态构建（GPL，开箱即用）
+// macOS：BtbN 不提供 macOS 构建，改用 Martin Riedl 的 snapshot 静态构建
+//   https://ffmpeg.martin-riedl.de/
+// 国内下载慢时可设置环境变量切换 GitHub 镜像（仅影响 BtbN 源）：
 //   set FFMPEG_MIRROR=https://ghfast.top    (Windows cmd)
 //   $env:FFMPEG_MIRROR="https://ghfast.top"  (PowerShell)
 //   export FFMPEG_MIRROR=https://ghfast.top (macOS/Linux)
 const FFMPEG_MIRROR = process.env.FFMPEG_MIRROR || "";
 const SOURCES = {
   "windows-x86_64": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-  "macos-x86_64":   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-gpl.tar.xz",
-  "macos-arm64":    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macosarm64-gpl.tar.xz",
+  "macos-x86_64":   "https://ffmpeg.martin-riedl.de/redirect/latest/macos/amd64/snapshot/ffmpeg.zip",
+  "macos-arm64":    "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/snapshot/ffmpeg.zip",
   "linux-x86_64":   "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz",
 };
 

@@ -85,7 +85,7 @@ async function loadEdition(): Promise<void> {
   // editionBadge.classList.add("pro");
   recordHeading.textContent = "Pro · 录屏转 GIF";
   recordIntro.textContent =
-    "通过 FFmpeg 抓屏（macOS avfoundation / Windows gdigrab / Linux x11grab）。最长 " +
+    "macOS 在应用内连续截屏（需屏幕录制权限）；Windows / Linux 走 FFmpeg。最长 " +
     String(PRO_RECORD_MAX_SEC) +
     " 秒，导出无水印。先抓一张全屏快照，用户在快照上框选区域后开始录制。";
   recordMaxSecInput.readOnly = false;
@@ -423,7 +423,8 @@ recordStartBtn.addEventListener("click", async () => {
   });
 
   setStatus(`正在录屏（${target.label}）… 录完点「停止」会弹保存框。`);
-  const cropRect: ScreenCropRect = target.rect;
+  const cropRect: ScreenCropRect | null =
+    target.source === "screen" ? null : target.rect;
 
   try {
     await recordToGif({

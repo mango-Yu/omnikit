@@ -1,7 +1,7 @@
 // 录屏转 GIF：完全交给 Rust 端通过 ffmpeg 完成。
 //
 // 调用 `record_to_gif_cmd` Tauri 命令。
-// - macOS：avfoundation 抓屏（设备索引 "1:"）。
+// - macOS：本进程 xcap 连续截屏（会走系统屏幕录制授权）。
 // - Windows：gdigrab 抓 desktop。
 // - Linux：x11grab 抓 :0.0。
 //

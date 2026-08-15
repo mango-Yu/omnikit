@@ -147,15 +147,27 @@ export function pickRecordingRegion(
       stage.style.height = `${dispH}px`;
     }
 
-    image.classList.add("record-region-image");
-    image.style.width = "100%";
-    image.style.height = "100%";
-    image.style.objectFit = "contain";
-    image.style.display = "block";
-    if (fullscreen) {
-      image.style.background = "#000";
-    }
-    stage.appendChild(image);
+    const stylePreviewImg = (img: HTMLImageElement): void => {
+      img.classList.add("record-region-image");
+      img.alt = "";
+      img.draggable = false;
+      img.style.position = "absolute";
+      img.style.inset = "0";
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "contain";
+      img.style.display = "block";
+      img.style.background = "#000";
+      img.style.zIndex = "0";
+    };
+    const imgFront = image;
+    const imgBack = new Image();
+    stylePreviewImg(imgFront);
+    stylePreviewImg(imgBack);
+    // 首帧加载完成前保持黑底，避免 WKWebView 裂图图标
+    imgFront.style.opacity = "0";
+    imgBack.style.opacity = "0";
+    stage.append(imgFront, imgBack);
 
     const canvas = document.createElement("canvas");
     if (fullscreen) {
@@ -457,33 +469,64 @@ export function pickRecordingRegion(
     };
     window.addEventListener("keydown", onKey);
 
-    // 实时刷新预览：每 200ms 重新拉一次 ffmpeg 覆写的同一张 PNG。
-    // 录制锁定时（用户已点"开始录制"）停止刷新。
+    // 实时刷新：双缓冲 + 等 onload 再换层。
+    // WKWebView 直接改 img.src 会先清空再解码，看起来一直闪；读到写到一半的 PNG 还会裂图。
     let pollTimer: number | null = null;
     if (getFrameUrl) {
-      const tick = (): void => {
-        if (dismissed || recordingLocked) {
-          if (pollTimer !== null) {
-            window.clearInterval(pollTimer);
-            pollTimer = null;
-          }
-          return;
-        }
-        try {
-          image.src = getFrameUrl();
-        } catch {
-          /* ignore */
-        }
-      };
-      tick();
-      pollTimer = window.setInterval(tick, 200);
-      // 用包装后的 dismissOverlay 同时清掉轮询
-      const origDismiss = dismissOverlay;
-      dismissOverlay = (): void => {
+      let visible = imgFront;
+      let hidden = imgBack;
+      let inFlight = false;
+
+      const stopPolling = (): void => {
         if (pollTimer !== null) {
-          window.clearInterval(pollTimer);
+          window.clearTimeout(pollTimer);
           pollTimer = null;
         }
+        hidden.onload = null;
+        hidden.onerror = null;
+      };
+
+      const queueNext = (delayMs: number): void => {
+        if (dismissed || recordingLocked) {
+          stopPolling();
+          return;
+        }
+        pollTimer = window.setTimeout(tick, delayMs);
+      };
+
+      const tick = (): void => {
+        if (dismissed || recordingLocked || inFlight) return;
+        inFlight = true;
+        const url = getFrameUrl();
+        const target = hidden;
+        const finish = (ok: boolean): void => {
+          target.onload = null;
+          target.onerror = null;
+          inFlight = false;
+          if (dismissed || recordingLocked) return;
+          if (ok) {
+            target.style.opacity = "1";
+            if (visible !== target) {
+              visible.style.opacity = "0";
+              hidden = visible;
+              visible = target;
+            }
+          }
+          queueNext(ok ? 280 : 160);
+        };
+        target.onload = () => finish(true);
+        target.onerror = () => finish(false);
+        try {
+          target.src = url;
+        } catch {
+          finish(false);
+        }
+      };
+
+      tick();
+      const origDismiss = dismissOverlay;
+      dismissOverlay = (): void => {
+        stopPolling();
         origDismiss();
       };
     }
