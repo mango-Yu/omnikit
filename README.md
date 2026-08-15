@@ -76,7 +76,7 @@ OmniKit 是一款基于 **Tauri 2** 的跨平台（macOS / Windows）桌面工�
   2. `npm run tauri:build` 时 Tauri 会自动把 `resources/ffmpeg/*` 拷到应用内（macOS: `*.app/Contents/Resources/_up_/ffmpeg/`，Windows: `resources/ffmpeg/`）。
   3. 应用启动时 `src-tauri/src/lib.rs` 的 `locate_bundled_ffmpeg` 会优先找到内嵌二进制，写入 `FFMPEG_PATH` 环境变量，`ffmpeg_export::ensure_ffmpeg` 优先使用之；找不到时回退到 `ffmpeg-sidecar` 自动下载。
 - **录屏平台差异**：
-  - macOS：在 OmniKit 进程内截屏（xcap），会弹出系统「屏幕录制」授权；请在「系统设置 → 隐私与安全性 → 屏幕录制」中允许本应用。
+  - macOS：在 OmniKit 进程内截屏（xcap），会弹出系统「屏幕录制」授权。开发版与安装包需分别勾选；勾选后必须 **Command+Q 完全退出再打开** 才会生效。详见下文「安装包一直要屏幕录制权限」。
   - Windows：使用 `gdigrab` 抓 desktop，无需额外配置。
   - Linux：使用 `x11grab`，需安装 `xdg-desktop-portal` 与 xcb 库。
 - **视频转 GIF**使用 FFmpeg 解码，**支持几乎所有常见格式**（不再受 WebView 解码能力限制）：MP4、M4V、MOV、AVI、MKV、WebM、FLV、WMV、MPEG、TS、M2TS、3GP、OGV 等。
@@ -217,6 +217,16 @@ xattr -cr "/Applications/OmniKit.app"
 ```
 
 也可在 Finder 中**右键 → 打开 → 打开**。路径请按实际安装位置调整。
+
+## macOS：安装包一直要屏幕录制权限
+
+`tauri dev` 和安装后的 `OmniKit.app` 在系统里是**两套身份**，开发时勾过的权限不会自动给安装包。授权后也必须让进程重新启动才会生效。
+
+1. 点「开始录屏」出现系统弹窗时，选「打开系统设置」，打开 **OmniKit**（若有两条同名记录，都打开）
+2. 回到应用后**不要继续点录屏**，按 **Command+Q** 完全退出（只关窗口不够）
+3. 再打开安装版，重新开始录屏
+
+若仍弹窗：到「系统设置 → 隐私与安全性 → 录屏与系统录音」，用列表下方的 **−** 删掉旧的 OmniKit，再按上面 1–3 步重新授权一次。每次重新打包安装后，未签名包的身份会变，可能需要再授一次。
 
 ---
 

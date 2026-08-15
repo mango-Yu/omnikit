@@ -60,6 +60,20 @@ pub fn ffmpeg_bin() -> Result<PathBuf, String> {
     ))
 }
 
+/// 构造 ffmpeg 子进程。Windows 上 ffmpeg.exe 是控制台程序，GUI 应用直接 spawn
+/// 会弹出黑框；CREATE_NO_WINDOW 让它在后台跑。
+fn ffmpeg_command(bin: impl AsRef<Path>) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut cmd = Command::new(bin.as_ref());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// 用 ffmpeg 自带的 -version 命令验证二进制可用，把首行版本字符串写日志。
 /// 主要用于诊断「文件存在但 spawn 失败」的情形。
 fn verify_ffmpeg(path: &std::path::Path) -> Result<(), String> {
@@ -71,7 +85,7 @@ fn verify_ffmpeg(path: &std::path::Path) -> Result<(), String> {
         path.display()
     );
 
-    let output = Command::new(path)
+    let output = ffmpeg_command(path)
         .arg("-version")
         .output()
         .map_err(|e| {
@@ -191,26 +205,48 @@ fn write_rgb_frame(
 
 #[cfg(target_os = "macos")]
 mod macos_tcc {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         fn CGRequestScreenCaptureAccess() -> bool;
         fn CGPreflightScreenCaptureAccess() -> bool;
     }
 
+    /// 每个进程只弹一次系统授权框。开关打开后当前进程仍无权限，再调
+    /// `CGRequestScreenCaptureAccess` 只会反复弹窗。
+    static REQUESTED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
+
+    const RESTART_REQUIRED: &str = "屏幕录制权限需要重新启动后才能生效。\n\
+请按 Command+Q 完全退出 OmniKit（只关窗口不够），再重新打开后开始录屏。\n\
+开发调试（tauri dev）和安装包是两套独立身份，系统设置里可能有两条「OmniKit」，请确认打开的是当前这个安装版。";
+
+    const NOT_GRANTED: &str = "未获得屏幕录制权限。请打开「系统设置 → 隐私与安全性 → 录屏与系统录音」，\
+勾选当前这个 OmniKit，然后按 Command+Q 完全退出再打开。开发版与安装包需要分别授权。";
+
     pub fn ensure() -> Result<(), String> {
-        unsafe {
-            if CGPreflightScreenCaptureAccess() {
-                return Ok(());
-            }
-            let granted = CGRequestScreenCaptureAccess();
-            if granted || CGPreflightScreenCaptureAccess() {
-                return Ok(());
-            }
+        if preflight() {
+            return Ok(());
         }
-        Err(
-            "未获得屏幕录制权限。请打开「系统设置 → 隐私与安全性 → 屏幕录制」，勾选 OmniKit 后完全退出再打开。"
-                .into(),
-        )
+
+        // 已经向系统要过一次：不要再弹系统框，否则会出现「设置里已打开仍不停提示」。
+        if REQUESTED_THIS_PROCESS.swap(true, Ordering::SeqCst) {
+            return Err(RESTART_REQUIRED.into());
+        }
+
+        let granted = unsafe { CGRequestScreenCaptureAccess() };
+        if preflight() {
+            return Ok(());
+        }
+        if granted {
+            // Request 在部分系统上会返回 true，但本进程仍截不到屏，必须重启。
+            return Err(RESTART_REQUIRED.into());
+        }
+        Err(NOT_GRANTED.into())
+    }
+
+    fn preflight() -> bool {
+        unsafe { CGPreflightScreenCaptureAccess() }
     }
 }
 
@@ -420,7 +456,7 @@ impl RawRgbProcess {
         frame_w: u32,
         frame_h: u32,
     ) -> Result<Self, String> {
-        let mut cmd = Command::new(bin);
+        let mut cmd = ffmpeg_command(bin);
         cmd.args(["-hide_banner", "-y"]);
         cmd.args(&args);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -530,7 +566,7 @@ pub fn video_to_gif(
                 .unwrap_or(0)
         ));
         let probe_path = probe_png.to_string_lossy().to_string();
-        let status = Command::new(&bin)
+        let status = ffmpeg_command(&bin)
             .args(["-v", "error", "-y", "-i", input_path])
             .args(["-vf", &scale_filter(max_long_edge)])
             .args(["-frames:v", "1", "-update", "1"])
@@ -665,7 +701,7 @@ pub fn record_to_gif(
     ));
     let probe_path = probe_png.to_string_lossy().to_string();
 
-    let mut probe_cmd = Command::new(&bin);
+    let mut probe_cmd = ffmpeg_command(&bin);
     probe_cmd.args(["-hide_banner", "-y"]);
     configure_record_input_std(&mut probe_cmd, fps, max_long_edge, None, region)?;
     probe_cmd
@@ -691,7 +727,7 @@ pub fn record_to_gif(
     }
 
     // 启动完整录屏进程
-    let mut cmd = Command::new(&bin);
+    let mut cmd = ffmpeg_command(&bin);
     cmd.args(["-hide_banner", "-y"]);
     configure_record_input_std(&mut cmd, fps, max_long_edge, Some(max_seconds), region)?;
     cmd.args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
@@ -920,7 +956,7 @@ fn capture_preview_png_inner(output_path: &str) -> Result<(u32, u32), String> {
     #[cfg(not(target_os = "macos"))]
     {
     let bin = ffmpeg_bin()?;
-    let mut cmd = Command::new(&bin);
+    let mut cmd = ffmpeg_command(&bin);
     cmd.args(["-hide_banner", "-y"]);
 
     #[cfg(target_os = "macos")]
@@ -1007,7 +1043,7 @@ pub fn start_record_preview(png_path: &str) -> Result<(u32, u32), String> {
     {
     ensure_ffmpeg()?;
     let bin = ffmpeg_bin()?;
-    let mut cmd = Command::new(&bin);
+    let mut cmd = ffmpeg_command(&bin);
     cmd.args(["-hide_banner", "-y"]);
     #[cfg(target_os = "macos")]
     {
