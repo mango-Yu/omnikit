@@ -21,12 +21,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 一个通用 DMG（Intel + Apple Silicon）
+          # 一个通用 DMG（Intel + Apple Silicon），两份 ffmpeg 按运行时架构选取
           - platform: macos-latest
             args: --target universal-apple-darwin --bundles dmg
+            ffmpeg_targets: macos-arm64 macos-x86_64
           # 一个 Windows 安装包 EXE
           - platform: windows-latest
             args: --bundles nsis
+            ffmpeg_targets: windows-x86_64
 
     runs-on: ${{ matrix.platform }}
 
@@ -54,6 +56,19 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm install
+
+      # 二进制不进 git；打包前按平台下载，Tauri 会拷进 resources/ffmpeg/
+      - name: Download bundled FFmpeg
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          for t in ${{ matrix.ffmpeg_targets }}; do
+            echo "::group::ffmpeg $t"
+            npm run ffmpeg:download -- --target="$t"
+            echo "::endgroup::"
+          done
+          ls -lh resources/ffmpeg/
 
       - name: Resolve release tag
         id: meta

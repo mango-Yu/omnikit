@@ -133,7 +133,7 @@ npm run tauri:build  # 本地打包
 
 ## 发布（Git Tag → GitHub Actions）
 
-推送符合 `v*` 的版本 tag 后，会自动触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)，每次只产出两个安装包：
+推送符合 `v*` 的版本 tag 后，会自动触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)。CI 会在打包前下载对应平台的 FFmpeg 并打进安装包（macOS 通用包含 arm64 + x64），每次产出：
 
 | 平台 | 产物 |
 |------|------|
